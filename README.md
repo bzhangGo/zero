@@ -40,4 +40,4 @@ decoding.
 * Clean and reformat the code
 
 ## Contact
-For any questions or suggestions, feel free to contact [Biao Zhang](mailto: B.Zhang@ed.ac.uk)
+For any questions or suggestions, feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)
