@@ -3,7 +3,7 @@ A neural machine translation system implemented by python + tensorflow.
 
 
 ## Motivation
-- General Framework than can deal with any NLP-related tasks
+- General Framework than can deal with NLP-related tasks
 - Make system as clean and simple as possible, remove other unnecessary modules
 
 Current implementation contains the following features:
@@ -13,12 +13,12 @@ your model is relatively small and fast, you will find that your GPU is waiting
 for your CPU. This is bad, as it can drop your GPU utilization, and just 
 waste your time.
 
-Hopefully, we can solve this problem with muti-threading programming, where
+    Hopefully, we can solve this problem with muti-threading programming, where
 when your model is running on GPU, another thread can continually fetch data
 into the CPU. As a result, there would be always available data batches for 
 your GPU.
 
-Unfortunately, python is notorious for its multi-thread programming due to
+    Unfortunately, python is notorious for its multi-thread programming due to
 the GIL mechanism. `In fact, I can not solve this problem` currently. I just
 used the multi-thread pool, but it does not work as I expect.
 
