@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import time
 import numpy as np
 import tensorflow as tf
 
@@ -219,3 +220,27 @@ def get_session(gpus):
 def flatten_list(values):
     """Flatten a list"""
     return [v for value in values for v in value]
+
+
+def remove_invalid_seq(sequence, mask):
+    """Pick valid sequence elements wrt mask"""
+    # sequence: [batch, sequence]
+    # mask: [batch, sequence]
+    boolean_mask = tf.reduce_sum(mask, axis=0)
+    boolean_mask = tf.cast(boolean_mask, tf.bool)
+
+    # make sure that there are at least one element in the mask
+    boolean_mask = tf.concat(
+        [[tf.constant(True, dtype=tf.bool)], boolean_mask], 0)[:-1]
+
+    filtered_seq = tf.boolean_mask(sequence, boolean_mask, axis=1)
+    filtered_mask = tf.boolean_mask(mask, boolean_mask, axis=1)
+    return filtered_seq, filtered_mask
+
+
+def time_str(t=None):
+    """String format of the time long data"""
+    if t is None:
+        t = time.time()
+    ts = time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime(t))
+    return ts

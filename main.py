@@ -195,9 +195,9 @@ def train(params):
                     if gstep % params.disp_freq == 0:
                         end_time = time.time()
                         tf.logging.info(
-                            "[{}] Epoch {}, GStep {}~{}, LStep {}~{}, "
-                            "Loss {:.3f}, GNorm {:.3f}, Lr {:.5f}, Time {:.3f} s"
-                            .format(str(time.ctime(int(end_time))), epoch,
+                            "{} Epoch {}, GStep {}~{}, LStep {}~{}, "
+                            "Loss {:.3f}, GNorm {:.3f}, Lr {:.5f}, Duration {:.3f} s"
+                            .format(util.time_str(end_time), epoch,
                                     gstep - params.disp_freq + 1, gstep,
                                     lidx - params.disp_freq * params.update_cycle + 1,
                                     lidx, np.mean(cum_loss), np.mean(cum_gnorm),
@@ -216,8 +216,8 @@ def train(params):
                                                  indices=indices)
                         eval_end_time = time.time()
                         tf.logging.info(
-                            "[{}] GStep {}, Scores {}, BLEU {}, Time {:.3f} s"
-                            .format(str(time.ctime(int(eval_end_time))), gstep,
+                            "{} GStep {}, Scores {}, BLEU {}, Duration {:.3f} s"
+                            .format(util.time_str(eval_end_time), gstep,
                                     np.mean(scores), bleu,
                                     eval_end_time - eval_start_time)
                         )
@@ -326,8 +326,8 @@ def evaluate(params):
                                  indices=indices)
         eval_end_time = time.time()
         tf.logging.info(
-            "[{}] Scores {}, BLEU {}, Time {}s"
-            .format(str(time.ctime(int(eval_end_time))),
+            "{} Scores {}, BLEU {}, Duration {}s"
+            .format(util.time_str(eval_end_time),
                     np.mean(scores), bleu, eval_end_time - eval_start_time)
         )
 

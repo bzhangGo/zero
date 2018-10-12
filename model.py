@@ -84,6 +84,8 @@ def encoder(source, params):
     mask = tf.to_float(tf.cast(source, tf.bool))
     hidden_size = params.hidden_size
 
+    source, mask = util.remove_invalid_seq(source, mask)
+
     embed_name = "embedding" if params.shared_source_target_embedding \
         else "src_embedding"
     src_emb = tf.get_variable(embed_name,
@@ -197,6 +199,9 @@ def decoder(target, state, params):
     mask = tf.to_float(tf.cast(target, tf.bool))
     hidden_size = params.hidden_size
 
+    if 'decoder' not in state:
+        target, mask = util.remove_invalid_seq(target, mask)
+
     embed_name = "embedding" if params.shared_source_target_embedding \
         else "tgt_embedding"
     tgt_emb = tf.get_variable(embed_name,
@@ -251,8 +256,14 @@ def decoder(target, state, params):
                                  factor=params.label_smooth)
     )
     centropy = tf.reshape(centropy, tf.shape(target))
+
     loss = tf.reduce_sum(centropy * mask, -1) / tf.reduce_sum(mask, -1)
     loss = tf.reduce_mean(loss)
+
+    # these mask tricks mainly used to deal with zero shapes, such as [0, 1]
+    loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
+                   lambda: tf.constant(0, dtype=tf.float32),
+                   lambda: loss)
 
     if 'decoder' in state:
         state['decoder']['state'] = outputs
