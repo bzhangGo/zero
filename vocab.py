@@ -76,9 +76,11 @@ class Vocab(object):
     def to_tokens(self, ids):
         return [self.get_token(id) for id in ids]
 
+    @property
     def eos(self):
         return self.get_id(self.eos_sym)
 
+    @property
     def pad(self):
         return self.get_id(self.pad_sym)
 

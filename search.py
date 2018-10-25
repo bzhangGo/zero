@@ -96,7 +96,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
         # curr_logits: [batch * beam, vocab_size]
         step_logits, step_state = decoding_fn(
-            flat_prev_seqs[:, -1:], flat_prev_state)
+            flat_prev_seqs[:, -1:], flat_prev_state, time)
         step_log_probs = util.log_prob_from_logits(step_logits)
         vocab_size = util.shape_list(step_log_probs)[-1]
 

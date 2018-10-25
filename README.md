@@ -39,5 +39,13 @@ decoding.
 * Multi-threading Data Processing
 * Clean and reformat the code
 
+## Reference
+When developing this repository, I referred to the following projects:
+
+* [Nematus](https://github.com/EdinburghNLP/nematus)
+* [THUMT](https://github.com/thumt/THUMT)
+* [Tensor2Tensor](https://github.com/tensorflow/tensor2tensor)
+* [Keras](https://github.com/keras-team/keras)
+
 ## Contact
 For any questions or suggestions, feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)

@@ -4,7 +4,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
 import tensorflow as tf
 
 
@@ -45,7 +44,6 @@ def _collect_gradients(gradients, variables):
 
 
 def create_train_op(loss, grads_and_vars, optimizer, global_step, params):
-
     with tf.name_scope("create_train_op"):
         gradients = [item[0] for item in grads_and_vars]
         variables = [item[1] for item in grads_and_vars]

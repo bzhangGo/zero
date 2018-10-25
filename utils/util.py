@@ -78,7 +78,7 @@ def label_smooth(labels, vocab_size, factor=0.1):
 
 def closing_dropout(params):
     """Removing all dropouts"""
-    for k, v in params.values().iteritems():
+    for k, v in params.values().items():
         if 'dropout' in k:
             setattr(params, k, 0.0)
     return params

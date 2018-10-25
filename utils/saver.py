@@ -18,11 +18,6 @@ class Saver(object):
         self.output_dir = output_dir
         self.output_best_dir = os.path.join(output_dir, "best")
 
-        if not tf.gfile.Exists(output_dir):
-            tf.gfile.MkDir(output_dir)
-        if not tf.gfile.Exists(self.output_best_dir):
-            tf.gfile.MkDir(self.output_best_dir)
-
         self.saver = tf.train.Saver(
             max_to_keep=checkpoints
         )
@@ -36,6 +31,11 @@ class Saver(object):
         )
 
     def save(self, session, step, metric_score):
+        if not tf.gfile.Exists(self.output_dir):
+            tf.gfile.MkDir(self.output_dir)
+        if not tf.gfile.Exists(self.output_best_dir):
+            tf.gfile.MkDir(self.output_best_dir)
+
         self.saver.save(session,
                         os.path.join(self.output_dir, "model"),
                         global_step=step)
@@ -60,6 +60,8 @@ class Saver(object):
             self.score_record.write("Steps {}, Metric Score {}\n"
                                     .format(step, metric_score))
 
+            self.score_record.flush()
+
     def restore(self, session, path=None):
         if path is not None and tf.gfile.Exists(path):
             check_dir = path
@@ -79,4 +81,39 @@ class Saver(object):
                 tf.logging.error("model '{}' does not exists"
                                  .format(model_path))
             else:
-                self.saver.restore(session, model_path)
+                try:
+                    self.saver.restore(session, model_path)
+                except tf.errors.NotFoundError:
+                    # In this case, we simply assume that the cycle part
+                    #   is mismatched, where the replicas are missing.
+                    # This would happen if you switch from un-cycle mode
+                    #   to cycle mode.
+                    tf.logging.warn("Starting Backup Restore")
+                    ops = []
+                    reader = tf.train.load_checkpoint(model_path)
+                    for var in tf.global_variables():
+                        name = var.op.name
+
+                        if reader.has_tensor(name):
+                            tf.logging.info('{} get initialization from {}'
+                                            .format(name, name))
+                            ops.append(
+                                tf.assign(var, reader.get_tensor(name)))
+                        else:
+                            if 'replica' in name:
+                                plain_name = name[:name.rfind('/replica')]
+                                plain_name = plain_name[len('create_train_op/'):]
+                                if reader.has_tensor(plain_name):
+                                    tf.logging.info(
+                                        '{} get initialization from {}'
+                                        .format(name, plain_name))
+                                    ops.append(
+                                        tf.assign(
+                                            var,
+                                            reader.get_tensor(plain_name))
+                                    )
+                                    continue
+
+                            tf.logging.warn("{} is missed".format(name))
+                    restore_op = tf.group(*ops, name="restore_global_vars")
+                    session.run(restore_op)

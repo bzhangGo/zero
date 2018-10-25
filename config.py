@@ -26,11 +26,16 @@ global_params = tc.training.HParams(
     top_beams=1,
     decode_alpha=0.6,
 
+    # parameters for rnnsearch
     hidden_size=1000,
     embed_size=620,
     dropout=0.1,
     label_smooth=0.1,
     model_name="rnnsearch",
+    # gru, lstm or atr
+    cell="gru",
+    # whether use caencoder
+    caencoder=False,
     layer_norm=True,
     # notice that when opening the swap memory switch
     # you can train reasonably larger batch on condition
@@ -139,7 +144,7 @@ def main(_):
                     "remember to remove all possible computations "
                     "inside the cell out. In addition, no `tf.while_loop`, "
                     "use `tf.scan` instead. Code will be clean. "
-                    "That's a lesson!@@!")
+                    "That's a lesson from me !@@!")
 
     params = global_params
 

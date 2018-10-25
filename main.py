@@ -9,7 +9,7 @@ import time
 import numpy as np
 import tensorflow as tf
 
-import model
+from models import rnnsearch as graph
 import evalu
 from data import Dataset
 from search import beam_search
@@ -19,7 +19,7 @@ from utils import parallel, cycle, util, queuer, saver
 def tower_train_graph(train_features, optimizer, params):
     # define multi-gpu training graph
     def _tower_train_graph(features):
-        loss = model.train_fn(
+        loss = graph.train_fn(
             features, params,
             initializer=tf.random_uniform_initializer(-0.08, 0.08))
         tower_gradients = optimizer.compute_gradients(
@@ -41,7 +41,7 @@ def tower_train_graph(train_features, optimizer, params):
 def tower_infer_graph(eval_features, params):
     # define multi-gpu inferring graph
     def _tower_infer_graph(features):
-        encoding_fn, decoding_fn = model.infer_fn(params)
+        encoding_fn, decoding_fn = graph.infer_fn(params)
         seqs, scores = beam_search(features, encoding_fn,
                                    decoding_fn, params)
         return seqs, scores
@@ -141,7 +141,7 @@ def train(params):
         train_saver.restore(sess)
 
         start_time = time.time()
-        for epoch in range(1, params.epoches):
+        for epoch in range(1, params.epoches + 1):
 
             if epoch < params.recorder.epoch:
                 tf.logging.info("Passing {}-th epoch according to record"
@@ -236,6 +236,14 @@ def train(params):
                                          "eval-{}.trans.txt".format(gstep)),
                             indices=indices)
 
+                        # handle the learning rate decay in a typical manner
+                        history_scores = params.recorder.valid_script_scores
+                        history_scores = [score[1] for score in history_scores]
+                        # if bleu score stop increasing, half it.
+                        if len(history_scores) > 0 and \
+                                max(history_scores) > history_scores[-1]:
+                            lrate = lrate / 2.
+
                         train_saver.save(sess, gstep, bleu)
 
                     if gstep > 0 and gstep % params.sample_freq == 0:
@@ -267,9 +275,6 @@ def train(params):
 
             # reset to 0
             params.recorder.lidx = 0
-
-            # handle the learning rate decay in a typical manner
-            lrate = lrate / 2.
 
     tf.logging.info("Anyway, your training is finished :)")
 
