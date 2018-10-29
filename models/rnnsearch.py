@@ -156,7 +156,10 @@ def train_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE):
         state = encoder(features['source'], params)
         loss, logits, state = decoder(features['target'], state, params)
-        return loss
+
+        return {
+            "loss": loss
+        }
 
 
 def infer_fn(params):

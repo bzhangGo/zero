@@ -217,4 +217,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     final_scores = tf.where(tf.reduce_any(final_flags, 1), final_scores,
                             init_scores)
 
-    return final_seqs[:, :, 1:], final_scores
+    return {
+        'seq': final_seqs[:, :, 1:],
+        'score': final_scores
+    }

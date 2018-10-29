@@ -43,7 +43,7 @@ def _collect_gradients(gradients, variables):
     return tf.group(*ops, name="collect_gradients")
 
 
-def create_train_op(loss, grads_and_vars, optimizer, global_step, params):
+def create_train_op(named_scalars, grads_and_vars, optimizer, global_step, params):
     with tf.name_scope("create_train_op"):
         gradients = [item[0] for item in grads_and_vars]
         variables = [item[1] for item in grads_and_vars]
@@ -52,22 +52,41 @@ def create_train_op(loss, grads_and_vars, optimizer, global_step, params):
             zero_variables_op = tf.no_op("zero_variables")
             collect_op = tf.no_op("collect_op")
         else:
-            loss_var = tf.Variable(tf.zeros([]), name="loss/replica",
-                                   trainable=False)
+            named_vars = {}
+            for name in named_scalars:
+                named_var = tf.Variable(tf.zeros([]),
+                                        name="{}/replica".format(name),
+                                        trainable=False)
+                named_vars[name] = named_var
             count_var = tf.Variable(tf.zeros([]), name="count/replica",
                                     trainable=False)
             slot_variables = _replicate_variables(variables)
             zero_variables_op = _zero_variables(slot_variables +
-                                                [loss_var, count_var])
+                                                [count_var] + named_vars.values())
+
+            collect_ops = []
+            # collect gradients
             collect_grads_op = _collect_gradients(gradients, slot_variables)
-            collect_loss_op = tf.assign_add(loss_var, loss)
+            collect_ops.append(collect_grads_op)
+
+            # collect other scalars
+            for name in named_scalars:
+                scalar = named_scalars[name]
+                named_var = named_vars[name]
+                collect_op = tf.assign_add(named_var, scalar)
+                collect_ops.append(collect_op)
+            # collect counting variable
             collect_count_op = tf.assign_add(count_var, 1.0)
-            collect_op = tf.group(collect_loss_op, collect_grads_op,
-                                  collect_count_op, name="collect_op")
+            collect_ops.append(collect_count_op)
+
+            collect_op = tf.group(*collect_ops, name="collect_op")
             scale = 1.0 / (tf.to_float(count_var) + 1.0)
             gradients = [scale * (g + s)
                          for (g, s) in zip(gradients, slot_variables)]
-            loss = scale * (loss + loss_var)
+
+            for name in named_scalars:
+                named_scalars[name] = scale * (
+                        named_scalars[name] + named_vars[name])
 
         global_norm = tf.global_norm(gradients)
 
@@ -87,9 +106,9 @@ def create_train_op(loss, grads_and_vars, optimizer, global_step, params):
             "train_op": train_op
         }
 
-        ret = {
-            "loss": loss,
+        ret = named_scalars
+        ret.update({
             "gradient_norm": global_norm,
-        }
+        })
 
     return ret, ops

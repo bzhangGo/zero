@@ -93,16 +93,36 @@ def data_parallelism(device_type, num_devices, fn, *args, **kwargs):
                 with tf.device(_device_setter):
                     outputs.append(fns[i](*new_args[i], **new_kwargs[i]))
 
+    # assumption: or outputs[0] are all tensor lists/tuples,
+    #             or outputs[0] are dictionaries
     if isinstance(outputs[0], (tuple, list)):
         outputs = list(zip(*outputs))
         outputs = tuple([list(o) for o in outputs])
+    else:
+        assert isinstance(outputs[0], dict), \
+            'invalid data type %s' % type(outputs[0])
+
+        combine_outputs = {}
+        for key in outputs[0]:
+            combine_outputs[key] = [o[key] for o in outputs]
+        outputs = combine_outputs
 
     return outputs
 
 
+def fusion_with_mask(datapoints, mask):
+    # combine datas in datapoints into one data by masking
+    while mask.get_shape().ndims < datapoints[0].get_shape().ndims + 1:
+        mask = tf.expand_dims(mask, -1)
+
+    data = tf.reduce_sum(tf.stack(datapoints, 0) * mask)
+    data /= tf.reduce_sum(mask)
+
+    return data
+
+
 def shard_features(features, num_devices):
-    """
-    Split features into several shards according to the given device list
+    """Split features into several shards according to the given device list
     :param features: a dictionary containing input datas
     :param num_devices: gpu device number
     """
@@ -113,13 +133,29 @@ def shard_features(features, num_devices):
                                  num_datashards)
     device_mask = tf.to_float(tf.greater(pieces, 0))
 
+    # why tile it?
+    # because the piece can be 0-shaped.
+    # feeding an empty input to the model may be problematic.
+    tile_size = tf.cond(tf.reduce_any(tf.equal(device_mask, 0.0)),
+                        lambda: num_datashards,
+                        lambda: 1)
+    tile_pieces = util.uniform_splits(
+        tf.shape(features.values()[0])[0] * tile_size,
+        num_datashards)
+
     for k, v in features.iteritems():
         v = tf.convert_to_tensor(v)
         if not v.shape.as_list():
             v = tf.expand_dims(v, axis=-1)
-            v = tf.tile(v, [num_datashards])
+            v = tf.tile(v, [tf.reduce_sum(tile_pieces)])
+        else:
+            # to avoid the empty data input
+            v_shp = util.shape_list(v)
+            t_shp = [1] * len(v_shp)
+            t_shp[0] = tile_size
+            v = tf.tile(v, t_shp)
         with tf.device(v.device):
-            sharded_features[k] = tf.split(v, pieces, 0)
+            sharded_features[k] = tf.split(v, tile_pieces, 0)
 
     datashard_to_features = []
 
@@ -148,7 +184,7 @@ def parallel_model(model_fn, features, devices, use_cpu=False):
 
 
 def average_gradients(tower_grads, mask=None):
-    """Copied from Bilm"""
+    """Modified from Bilm"""
     # calculate average gradient for each shared variable across all GPUs
     average_grads = []
     for grad_and_vars in zip(*tower_grads):

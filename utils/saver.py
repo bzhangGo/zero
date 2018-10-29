@@ -56,11 +56,11 @@ class Saver(object):
             _move(os.path.join(self.output_dir, "record.json"),
                   os.path.join(self.output_best_dir, "record.json"))
 
-            # this recorder only record best scores
-            self.score_record.write("Steps {}, Metric Score {}\n"
-                                    .format(step, metric_score))
+        # record scores
+        self.score_record.write("Steps {}, Metric Score {}\n"
+                                .format(step, metric_score))
 
-            self.score_record.flush()
+        self.score_record.flush()
 
     def restore(self, session, path=None):
         if path is not None and tf.gfile.Exists(path):

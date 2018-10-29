@@ -19,21 +19,24 @@ from utils import parallel, cycle, util, queuer, saver
 def tower_train_graph(train_features, optimizer, params):
     # define multi-gpu training graph
     def _tower_train_graph(features):
-        loss = graph.train_fn(
+        train_output = graph.train_fn(
             features, params,
             initializer=tf.random_uniform_initializer(-0.08, 0.08))
         tower_gradients = optimizer.compute_gradients(
-            loss, colocate_gradients_with_ops=True)
-        return loss, tower_gradients
+            train_output["loss"], colocate_gradients_with_ops=True)
+        return {
+            "loss": train_output["loss"],
+            "gradient": tower_gradients
+        }
 
     # feed model to multiple gpus
     tower_outputs, tower_mask = parallel.parallel_model(
         _tower_train_graph, train_features,
         params.gpus, use_cpu=(len(params.gpus) == 0))
-    tower_losses, tower_grads = tower_outputs[0], tower_outputs[1]
-    loss = tf.reduce_sum(tf.stack(tower_losses, 0) * tower_mask)
-    loss /= tf.reduce_sum(tower_mask)
-    gradients = parallel.average_gradients(tower_grads, mask=tower_mask)
+
+    loss = parallel.fusion_with_mask(tower_outputs['loss'], tower_mask)
+    gradients = parallel.average_gradients(
+        tower_outputs['gradient'], mask=tower_mask)
 
     return loss, gradients
 
@@ -42,15 +45,15 @@ def tower_infer_graph(eval_features, params):
     # define multi-gpu inferring graph
     def _tower_infer_graph(features):
         encoding_fn, decoding_fn = graph.infer_fn(params)
-        seqs, scores = beam_search(features, encoding_fn,
-                                   decoding_fn, params)
-        return seqs, scores
+        beam_output = beam_search(features, encoding_fn,
+                                  decoding_fn, params)
+        return beam_output
 
     # feed model to multiple gpus
     eval_outputs, eval_mask = parallel.parallel_model(
         _tower_infer_graph, eval_features,
         params.gpus, use_cpu=(len(params.gpus) == 0))
-    eval_seqs, eval_scores = eval_outputs[0], eval_outputs[1]
+    eval_seqs, eval_scores = eval_outputs['seq'], eval_outputs['score']
 
     return eval_seqs, eval_scores, eval_mask
 
@@ -105,7 +108,7 @@ def train(params):
         loss, gradients = tower_train_graph(train_features, optimizer, params)
 
         # apply pseudo cyclic parallel operation
-        vle, ops = cycle.create_train_op(loss, gradients,
+        vle, ops = cycle.create_train_op({"loss": loss}, gradients,
                                          optimizer, global_step, params)
 
         tf.logging.info("End Building Training Graph, within {} seconds"

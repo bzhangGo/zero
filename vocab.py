@@ -61,9 +61,9 @@ class Vocab(object):
         for word, _ in sorted_word2count:
             self.insert(word)
 
-    def save_vocab(self, vocab_file):
+    def save_vocab(self, vocab_file, size=1e6):
         with open(vocab_file, 'w') as writer:
-            for id in range(self.size()):
+            for id in range(min(self.size(), int(size))):
                 writer.write(self.id2word[id] + "\n")
 
     def to_id(self, tokens, append_eos=True):
@@ -76,17 +76,16 @@ class Vocab(object):
     def to_tokens(self, ids):
         return [self.get_token(id) for id in ids]
 
-    @property
     def eos(self):
         return self.get_id(self.eos_sym)
 
-    @property
     def pad(self):
         return self.get_id(self.pad_sym)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser('Vocabulary Preparison')
+    parser.add_argument('--size', type=int, default=1e6, help='maximum vocabulary size')
     parser.add_argument('input', type=str, help='the input file path')
     parser.add_argument('output', type=str, help='the output file name')
 
@@ -99,6 +98,6 @@ if __name__ == "__main__":
                 vocab.insert(token)
 
     vocab.sort_vocab()
-    vocab.save_vocab(args.output)
+    vocab.save_vocab(args.output, args.size)
 
     print("Loading {} tokens from {}".format(vocab.size(), args.input))
