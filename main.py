@@ -239,14 +239,6 @@ def train(params):
                                          "eval-{}.trans.txt".format(gstep)),
                             indices=indices)
 
-                        # handle the learning rate decay in a typical manner
-                        history_scores = params.recorder.valid_script_scores
-                        history_scores = [score[1] for score in history_scores]
-                        # if bleu score stop increasing, half it.
-                        if len(history_scores) > 0 and \
-                                max(history_scores) > history_scores[-1]:
-                            lrate = lrate / 2.
-
                         train_saver.save(sess, gstep, bleu)
 
                     if gstep > 0 and gstep % params.sample_freq == 0:
@@ -278,6 +270,9 @@ def train(params):
 
             # reset to 0
             params.recorder.lidx = 0
+
+            # handle the learning rate decay in a typical manner
+            lrate = lrate / 2.
 
     tf.logging.info("Anyway, your training is finished :)")
 
