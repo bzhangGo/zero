@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from func import linear
+from func import linear, layer_norm
 from rnns import cell as cell
 
 
@@ -62,6 +62,9 @@ class lstm(cell.Cell):
 
             c = i * h_c + f * c_
 
-            h = o * tf.tanh(c)
+            c_h = c
+            if self.ln:
+                c_h = layer_norm(c_h)
+            h = o * tf.tanh(c_h)
 
         return tf.concat([h, c], -1)

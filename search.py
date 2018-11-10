@@ -100,6 +100,12 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         step_log_probs = util.log_prob_from_logits(step_logits)
         vocab_size = util.shape_list(step_log_probs)[-1]
 
+        # force decoding
+        eos_mask = tf.to_float(tf.equal(tf.range(vocab_size), eos_id))
+        step_log_probs = tf.cond(tf.to_float(time) < tf.to_float(1.),
+                                 lambda: step_log_probs + tf.expand_dims(eos_mask, 0) * -1e9,
+                                 lambda: step_log_probs)
+
         # expand to [batch, beam, vocab_size]
         step_log_probs = util.unmerge_neighbor_dims(step_log_probs,
                                                     batch_size, axis=0)

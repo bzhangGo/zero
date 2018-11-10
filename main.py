@@ -269,7 +269,7 @@ def train(params):
             train_queue.stop()
 
             # reset to 0
-            params.recorder.lidx = 0
+            params.recorder.lidx = -1
 
             # handle the learning rate decay in a typical manner
             lrate = lrate / 2.
