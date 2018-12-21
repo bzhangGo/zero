@@ -14,7 +14,7 @@ import tensorflow.contrib as tc
 
 import main as graph
 from vocab import Vocab
-from recorder import Recorder
+from utils.recorder import Recorder
 
 # define global initial parameters
 global_params = tc.training.HParams(

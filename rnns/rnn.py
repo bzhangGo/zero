@@ -147,7 +147,7 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
             c_c = cell_higher.fetch_states(c)
         else:
             a = tf.tile(tf.expand_dims(tf.range(time_steps), 0), [batch_size, 1])
-            a = tf.to_float(a == t)
+            a = tf.to_float(tf.equal(a, t))
             a = tf.reshape(a, tf.shape(init_weight))
 
         h = cell_higher(s, c_c)
