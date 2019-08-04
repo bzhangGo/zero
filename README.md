@@ -1,5 +1,7 @@
 # Zero 
-A neural machine translation system implemented by python + tensorflow.
+A neural machine translation system implemented by python (2.7) + tensorflow.
+
+A major update will be available soon!
 
 > The project is still under development, and not fully tested. So there may
 be unknown bugs.
