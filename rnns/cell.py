@@ -7,6 +7,7 @@ from __future__ import print_function
 import abc
 import tensorflow as tf
 from func import linear
+from utils import dtype
 
 
 # This is an abstract class that deals with
@@ -21,7 +22,7 @@ class Cell(object):
         self.scope = scope
         self.ln = ln
 
-    def _get_init_state(self, d, shape=None, x=None):
+    def _get_init_state(self, d, shape=None, x=None, scope=None):
         # gen init state vector
         # if no evidence x is provided, use zero initialization
         if x is None:
@@ -29,18 +30,18 @@ class Cell(object):
             if not isinstance(shape, (tuple, list)):
                 shape = [shape]
             shape = shape + [d]
-            return tf.zeros(shape, tf.float32)
+            return dtype.tf_to_float(tf.zeros(shape))
         else:
             return linear(
                 x, d, bias=True, ln=self.ln,
-                scope="{}_init".format(self.scope)
+                scope="{}_init".format(scope or self.scope)
             )
 
     def get_hidden(self, x):
         return x
 
     @abc.abstractmethod
-    def get_init_state(self, shape=None, x=None):
+    def get_init_state(self, shape=None, x=None, scope=None):
         raise NotImplementedError("Not Supported")
 
     @abc.abstractmethod

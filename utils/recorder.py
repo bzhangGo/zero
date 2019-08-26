@@ -19,4 +19,6 @@ class Recorder(object):
 
     def save_to_json(self, file_name):
         tf.logging.info("Saving recorder file into {}".format(file_name))
-        json.dump(self.__dict__, open(file_name, 'wb'), indent=2)
+        with open(file_name, 'wb') as writer:
+            writer.write(json.dumps(self.__dict__, indent=2).encode("utf-8"))
+            writer.close()

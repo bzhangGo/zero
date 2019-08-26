@@ -7,7 +7,7 @@ from __future__ import print_function
 import copy
 import tensorflow as tf
 
-from func import linear
+import func
 from models import model
 from utils import util, dtype
 from rnns import rnn
@@ -31,46 +31,71 @@ def encoder(source, params):
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
     with tf.variable_scope("encoder"):
-        # forward rnn
-        with tf.variable_scope('forward'):
-            outputs = rnn.rnn(params.cell, inputs, hidden_size, mask=mask,
-                              ln=params.layer_norm, sm=params.swap_memory)
-            output_fw, state_fw = outputs[1]
-        # backward rnn
-        with tf.variable_scope('backward'):
-            if not params.caencoder:
-                outputs = rnn.rnn(params.cell, tf.reverse(inputs, [1]),
-                                  hidden_size, mask=tf.reverse(mask, [1]),
-                                  ln=params.layer_norm, sm=params.swap_memory)
-                output_bw, state_bw = outputs[1]
-            else:
-                outputs = rnn.cond_rnn(params.cell, tf.reverse(inputs, [1]),
-                                       tf.reverse(output_fw, [1]), hidden_size,
-                                       mask=tf.reverse(mask, [1]),
-                                       ln=params.layer_norm,
-                                       sm=params.swap_memory,
-                                       num_heads=params.num_heads,
-                                       one2one=True)
-                output_bw, state_bw = outputs[1]
+        x = inputs
 
-            output_bw = tf.reverse(output_bw, [1])
+        for layer in range(params.num_encoder_layer):
+            with tf.variable_scope("layer_{}".format(layer)):
+                # forward rnn
+                with tf.variable_scope('forward'):
+                    outputs = rnn.rnn(params.cell, x, hidden_size, mask=mask,
+                                      ln=params.layer_norm, sm=params.swap_memory)
+                    output_fw, state_fw = outputs[1]
+                if layer == 0:
+                    # backward rnn
+                    with tf.variable_scope('backward'):
+                        if not params.caencoder:
+                            outputs = rnn.rnn(params.cell, tf.reverse(x, [1]),
+                                              hidden_size, mask=tf.reverse(mask, [1]),
+                                              ln=params.layer_norm, sm=params.swap_memory)
+                            output_bw, state_bw = outputs[1]
+                        else:
+                            outputs = rnn.cond_rnn(params.cell, tf.reverse(x, [1]),
+                                                   tf.reverse(output_fw, [1]), hidden_size,
+                                                   mask=tf.reverse(mask, [1]),
+                                                   ln=params.layer_norm,
+                                                   sm=params.swap_memory,
+                                                   num_heads=params.num_heads,
+                                                   one2one=True)
+                            output_bw, state_bw = outputs[1]
 
-    if not params.caencoder:
-        source_encodes = tf.concat([output_fw, output_bw], -1)
-        source_feature = tf.concat([state_fw, state_bw], -1)
-    else:
-        source_encodes = output_bw
-        source_feature = state_bw
+                        output_bw = tf.reverse(output_bw, [1])
+
+                    if not params.caencoder:
+                        y = tf.concat([output_fw, output_bw], -1)
+                        z = tf.concat([state_fw, state_bw], -1)
+                    else:
+                        y = output_bw
+                        z = state_bw
+                else:
+                    y = output_fw
+                    z = state_fw
+
+                y = func.linear(y, params.embed_size, ln=False, scope="ff")
+
+                # short cut via residual connection
+                if x.get_shape()[-1].value == y.get_shape()[-1].value:
+                    x = func.residual_fn(x, y, dropout=params.dropout)
+                else:
+                    x = y
+                if params.layer_norm:
+                    x = func.layer_norm(x, scope="ln")
+
+    if params.embed_size != hidden_size:
+        x = func.layer_norm(func.linear(x, hidden_size, scope="x_map"))
 
     with tf.variable_scope("decoder_initializer"):
-        decoder_init = rnn.get_cell(
+        decoder_cell = rnn.get_cell(
             params.cell, hidden_size, ln=params.layer_norm
-        ).get_init_state(x=source_feature)
-    decoder_init = tf.tanh(decoder_init)
+        )
 
     return {
-        "encodes": source_encodes,
-        "decoder_initializer": decoder_init,
+        "encodes": x,
+        "decoder_initializer": {
+            "layer_{}".format(l):
+                decoder_cell.get_init_state(
+                    x=z, scope="layer_{}".format(l))
+            for l in range(params.num_decoder_layer)
+        },
         "mask": mask
     }
 
@@ -106,22 +131,58 @@ def decoder(target, state, params):
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
     with tf.variable_scope("decoder"):
-        init_state = state["decoder_initializer"]
-        if not is_training:
-            init_state = state["decoder"]["state"]
-        returns = rnn.cond_rnn(params.cell, inputs, state["encodes"], hidden_size,
-                               init_state=init_state, mask=mask,
-                               mem_mask=state["mask"], ln=params.layer_norm,
-                               sm=params.swap_memory, one2one=False)
-        (_, hidden_state), (outputs, _), contexts, attentions = returns
+        x = inputs
+        for layer in range(params.num_decoder_layer):
+            with tf.variable_scope("layer_{}".format(layer)):
+                init_state = state["decoder_initializer"]["layer_{}".format(layer)]
+                if not is_training:
+                    init_state = state["decoder"]["state"]["layer_{}".format(layer)]
+                if layer == 0 or params.use_deep_att:
+                    returns = rnn.cond_rnn(params.cell, x, state["encodes"], hidden_size,
+                                           init_state=init_state, mask=mask,
+                                           num_heads=params.num_heads,
+                                           mem_mask=state["mask"], ln=params.layer_norm,
+                                           sm=params.swap_memory, one2one=False)
+                    (_, hidden_state), (outputs, _), contexts, attentions = returns
+                    c = contexts
+                else:
+                    if params.caencoder:
+                        returns = rnn.cond_rnn(params.cell, x, c,
+                                               hidden_size, init_state=init_state,
+                                               mask=mask, mem_mask=mask,
+                                               ln=params.layer_norm,
+                                               sm=params.swap_memory,
+                                               num_heads=params.num_heads,
+                                               one2one=True)
+                        (_, hidden_state), (outputs, _), contexts, attentions = returns
+                    else:
+                        outputs = rnn.rnn(params.cell, tf.concat([x, c], -1),
+                                          hidden_size, mask=mask, init_state=init_state,
+                                          ln=params.layer_norm, sm=params.swap_memory)
+                        outputs, hidden_state = outputs[1]
+                if not is_training:
+                    state['decoder']['state']['layer_{}'.format(layer)] = hidden_state
 
-    feature = linear([outputs, contexts, inputs], params.embed_size,
-                     ln=params.layer_norm, scope="pre_logits")
+                y = func.linear(outputs, params.embed_size, ln=False, scope="ff")
+
+                # short cut via residual connection
+                if x.get_shape()[-1].value == y.get_shape()[-1].value:
+                    x = func.residual_fn(x, y, dropout=params.dropout)
+                else:
+                    x = y
+                if params.layer_norm:
+                    x = func.layer_norm(x, scope="ln")
+
+    if params.dl4mt_redict:
+        feature = func.linear(tf.concat([x, c], -1), params.embed_size, ln=params.layer_norm, scope="ff")
+        feature = tf.nn.tanh(feature)
+
+        feature = util.valid_apply_dropout(feature, params.dropout)
+    else:
+        feature = x
+
     if 'dev_decode' in state:
-        feature = feature[:, -1, :]
-
-    feature = tf.tanh(feature)
-    feature = util.valid_apply_dropout(feature, params.dropout)
+        feature = x[:, -1, :]
 
     embed_name = "tgt_embedding" if params.shared_target_softmax_embedding \
         else "softmax_embedding"
@@ -153,9 +214,6 @@ def decoder(target, state, params):
     loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
                    lambda: tf.constant(0, dtype=tf.float32),
                    lambda: loss)
-
-    if not is_training:
-        state['decoder']['state'] = hidden_state
 
     return loss, logits, state, per_sample_loss
 
@@ -226,4 +284,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("rnnsearch", train_fn, score_fn, infer_fn)
+model.model_register("deepnmt", train_fn, score_fn, infer_fn)

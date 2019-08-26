@@ -13,11 +13,14 @@ from rnns import cell as cell
 class atr(cell.Cell):
     """The Addition-Subtraction Twin-Gated Recurrent Unit."""
 
-    def __init__(self, d, ln=False, scope='atr'):
+    def __init__(self, d, ln=False, twin=True, scope='atr'):
         super(atr, self).__init__(d, ln=ln, scope=scope)
 
-    def get_init_state(self, shape=None, x=None):
-        return self._get_init_state(self.d, shape=shape, x=x)
+        self.twin = twin
+
+    def get_init_state(self, shape=None, x=None, scope=None):
+        return self._get_init_state(
+            self.d, shape=shape, x=x, scope=scope)
 
     def fetch_states(self, x):
         with tf.variable_scope(
@@ -45,8 +48,12 @@ class atr(cell.Cell):
                        ln=self.ln, scope="hide_h")
             p = x
 
-            i = tf.sigmoid(p + q)
             f = tf.sigmoid(p - q)
+            if self.twin:
+                i = tf.sigmoid(p + q)
+            # we empirically find that the following simple form is more stable.
+            else:
+                i = 1. - f
 
             h = i * p + f * h_
 

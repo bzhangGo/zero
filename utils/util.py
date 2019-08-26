@@ -6,8 +6,12 @@ from __future__ import print_function
 
 import os
 import time
+import pkgutil
+import collections
 import numpy as np
 import tensorflow as tf
+
+from utils import dtype
 
 
 def batch_indexer(datasize, batch_size):
@@ -32,18 +36,28 @@ def token_indexer(dataset, token_size):
 
     _batcher = [0.] * len(dataset[0])
     _counter = 0
-    for i in range(len(dataset)):
+    i = 0
+    while True:
+        if i >= len(dataset): break
+
         # attempt put this datapoint into batch
         _batcher = [max(max_l, l)
                     for max_l, l in zip(_batcher, dataset[i])]
         _counter += 1
         for l in _batcher:
             if _counter * l >= token_size:
-                batchindex.append(dataindex[i-_counter+1: i+1])
+                # when an extreme instance occur, handle it by making a 1-size batch
+                if _counter > 1:
+                    batchindex.append(dataindex[i-_counter+1: i])
+                    i -= 1
+                else:
+                    batchindex.append(dataindex[i: i+1])
 
                 _counter = 0
                 _batcher = [0.] * len(dataset[0])
                 break
+
+        i += 1
 
     _counter = sum([len(slice) for slice in batchindex])
     if _counter != len(dataset):
@@ -51,29 +65,36 @@ def token_indexer(dataset, token_size):
     return batchindex
 
 
-def mask_scale(value, mask, scale=1e9):
+def mask_scale(value, mask, scale=None):
     """Prepared for masked softmax"""
+    if scale is None:
+        scale = dtype.inf()
     return value + (1. - mask) * (-scale)
 
 
-def valid_dropout(dropout):
-    """To check whether the dropout value is valid"""
-    return dropout is not None and 0. <= dropout <= 1.
+def valid_apply_dropout(x, dropout):
+    """To check whether the dropout value is valid, apply if valid"""
+    if dropout is not None and 0. <= dropout <= 1.:
+        return tf.nn.dropout(x, 1. - dropout)
+    return x
 
 
 def label_smooth(labels, vocab_size, factor=0.1):
     """Smooth the gold label distribution"""
     if 0. < factor < 1.:
-        n = tf.to_float(vocab_size - 1)
+        n = tf.cast(vocab_size - 1, tf.float32)
         p = 1. - factor
         q = factor / n
 
-        t = tf.one_hot(tf.to_int32(tf.reshape(labels, [-1])),
+        t = tf.one_hot(tf.cast(tf.reshape(labels, [-1]), tf.int32),
                        depth=vocab_size, on_value=p, off_value=q)
+        normalizing = -(p * tf.log(p) + n * q * tf.log(q + 1e-20))
     else:
-        t = tf.one_hot(tf.to_int32(tf.reshape(labels, [-1])))
+        t = tf.one_hot(tf.cast(tf.reshape(labels, [-1]), tf.int32),
+                       depth=vocab_size)
+        normalizing = 0.
 
-    return t
+    return t, normalizing
 
 
 def closing_dropout(params):
@@ -81,7 +102,20 @@ def closing_dropout(params):
     for k, v in params.values().items():
         if 'dropout' in k:
             setattr(params, k, 0.0)
+        # consider closing label smoothing
+        if 'label_smoothing' in k:
+            setattr(params, k, 0.0)
     return params
+
+
+def dict_update(d, u):
+    """Recursive update dictionary"""
+    for k, v in u.items():
+        if isinstance(v, collections.Mapping):
+            d[k] = dict_update(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
 
 
 def shape_list(x):
@@ -146,9 +180,18 @@ def expand_tile_dims(x, depth, axis=1):
     return tf.tile(x, tile_dims)
 
 
+def gumbel_noise(shape, eps=None):
+    """Generate gumbel noise shaped by shape"""
+    if eps is None:
+        eps = dtype.epsilon()
+
+    u = tf.random_uniform(shape, minval=0, maxval=1)
+    return -tf.log(-tf.log(u + eps) + eps)
+
+
 def log_prob_from_logits(logits):
     """Probability from un-nomalized logits"""
-    return logits - tf.reduce_logsumexp(logits, axis=-1, keep_dims=True)
+    return logits - tf.reduce_logsumexp(logits, axis=-1, keepdims=True)
 
 
 def batch_coordinates(batch_size, beam_size):
@@ -195,7 +238,7 @@ def fetch_valid_ref_files(path):
     num = 0
     files = []
     while True:
-        file_path = tf.gfile.Exists(path + ".ref%s" % num)
+        file_path = path + ".ref%s" % num
         if tf.gfile.Exists(file_path):
             files.append(file_path)
         else:
@@ -227,11 +270,11 @@ def remove_invalid_seq(sequence, mask):
     # sequence: [batch, sequence]
     # mask: [batch, sequence]
     boolean_mask = tf.reduce_sum(mask, axis=0)
-    boolean_mask = tf.cast(boolean_mask, tf.bool)
 
     # make sure that there are at least one element in the mask
-    boolean_mask = tf.concat(
-        [[tf.constant(True, dtype=tf.bool)], boolean_mask], 0)[:-1]
+    first_one = tf.one_hot(0, tf.shape(boolean_mask)[0],
+                           dtype=tf.as_dtype(dtype.floatx()))
+    boolean_mask = tf.cast(boolean_mask + first_one, tf.bool)
 
     filtered_seq = tf.boolean_mask(sequence, boolean_mask, axis=1)
     filtered_mask = tf.boolean_mask(mask, boolean_mask, axis=1)
@@ -244,3 +287,15 @@ def time_str(t=None):
         t = time.time()
     ts = time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime(t))
     return ts
+
+
+def dynamic_load_module(module, prefix=None):
+    """Load submodules inside a module, mainly used for model loading, not robust!!!"""
+    # loading all models under directory `models` dynamically
+    if not isinstance(module, str):
+        module = module.__path__
+    for importer, modname, ispkg in pkgutil.iter_modules(module):
+        if prefix is None:
+            __import__(modname)
+        else:
+            __import__("{}.{}".format(prefix, modname))

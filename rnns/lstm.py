@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from func import linear, layer_norm
+from func import linear
 from rnns import cell as cell
 
 
@@ -16,8 +16,9 @@ class lstm(cell.Cell):
     def __init__(self, d, ln=False, scope='lstm'):
         super(lstm, self).__init__(d, ln=ln, scope=scope)
 
-    def get_init_state(self, shape=None, x=None):
-        return self._get_init_state(self.d * 2, shape=shape, x=x)
+    def get_init_state(self, shape=None, x=None, scope=None):
+        return self._get_init_state(
+            self.d * 2, shape=shape, x=x, scope=scope)
 
     def get_hidden(self, x):
         return tf.split(x, 2, -1)[0]
@@ -62,9 +63,6 @@ class lstm(cell.Cell):
 
             c = i * h_c + f * c_
 
-            c_h = c
-            if self.ln:
-                c_h = layer_norm(c_h)
-            h = o * tf.tanh(c_h)
+            h = o * tf.tanh(c)
 
         return tf.concat([h, c], -1)
