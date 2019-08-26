@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from utils import util
+from utils import util, dtype
 from collections import namedtuple
 from tensorflow.python.util import nest
 
@@ -24,9 +24,13 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     pad_id = params.tgt_vocab.pad()
 
     batch_size = tf.shape(features["source"])[0]
-    model_state = encoding_fn(features["source"])
+    if params.search_mode == "cache":
+        model_state = encoding_fn(features["source"])
+    else:
+        model_state = features["source"]
 
-    source_length = tf.reduce_sum(model_state["mask"], -1)
+    src_mask = dtype.tf_to_float(tf.cast(features["source"], tf.bool))
+    source_length = tf.reduce_sum(src_mask, -1)
     max_target_length = source_length + decode_length
 
     model_state = nest.map_structure(
@@ -34,16 +38,43 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         model_state
     )
 
+    # in our mixed precision mode, we finally convert logits into tf.float32
+    # tfdtype = tf.as_dtype(dtype.floatx())
+    tfdtype = tf.float32
+
     # [batch, beam]
-    init_log_probs = tf.constant([[0.] + [tf.float32.min] * (beam_size - 1)])
+    init_log_probs = tf.constant([[0.] + [tfdtype.min] * (beam_size - 1)], dtype=tfdtype)
     init_log_probs = tf.tile(init_log_probs, [batch_size, 1])
     init_scores = tf.zeros_like(init_log_probs)
     # [batch, beam, 1], begin-of-sequence
     init_seq = tf.fill([batch_size, beam_size, 1], params.tgt_vocab.pad())
     init_finish_seq = tf.zeros_like(init_seq)
     # [batch, beam]
-    init_finish_scores = tf.fill([batch_size, beam_size], tf.float32.min)
+    init_finish_scores = tf.fill([batch_size, beam_size], tfdtype.min)
     init_finish_flags = tf.zeros([batch_size, beam_size], tf.bool)
+
+    def cache_init(prev_seq, state):
+        # used to initialize some caches
+        # this is because pre-compute these caches is to hard,
+        # so let's use one dummy run to obtain them.
+        flat_prev_seqs = util.merge_neighbor_dims(prev_seq, axis=0)
+        flat_prev_state = nest.map_structure(
+            lambda x: util.merge_neighbor_dims(x, axis=0),
+            state
+        )
+        _, step_state = decoding_fn(
+            flat_prev_seqs[:, -1:], flat_prev_state, 0)
+
+        new_state = nest.map_structure(
+            lambda x: util.unmerge_neighbor_dims(x, batch_size, axis=0),
+            step_state
+        )
+        new_state = util.dict_update(new_state, state)
+
+        return new_state
+
+    if params.search_mode == "cache":
+        model_state = cache_init(init_seq, model_state)
 
     bsstate = BeamSearchState(
         inputs=(init_seq, init_log_probs, init_scores),
@@ -61,15 +92,15 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
         # upper bound of length penality
         max_length_penality = tf.pow(
-            (5. + tf.to_float(max_target_length)) / 6., alpha)
+            (5. + tf.cast(max_target_length, tfdtype)) / 6., alpha)
         best_alive_score = alive_log_probs[:, 0] / max_length_penality
 
         # minimum score among finished sequences alone
         worst_finish_score = tf.reduce_min(
-            finish_scores * tf.to_float(finish_flags), 1)
+            finish_scores * tf.cast(finish_flags, tfdtype), 1)
         # deal with unfinished instances, which is set to `tf.float32.min`
-        unfinish_mask = 1. - tf.to_float(tf.reduce_any(finish_flags, 1))
-        worst_finish_score += unfinish_mask * tf.float32.min
+        unfinish_mask = 1. - tf.cast(tf.reduce_any(finish_flags, 1), tfdtype)
+        worst_finish_score += unfinish_mask * tfdtype.min
 
         # boundary
         bound_is_met = tf.reduce_all(tf.greater(worst_finish_score,
@@ -77,7 +108,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
         # length constraint
         length_is_met = tf.reduce_any(
-            tf.less(time, tf.to_int32(max_target_length)))
+            tf.less(time, tf.cast(max_target_length, tf.int32)))
 
         return tf.logical_and(tf.logical_not(bound_is_met), length_is_met)
 
@@ -95,15 +126,32 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         )
 
         # curr_logits: [batch * beam, vocab_size]
+        if params.search_mode == "cache":
+            decode_target = flat_prev_seqs[:, -1:]
+        else:
+            # introducing `dev` mode into search function
+            # this mainly is for model developing, because when developing new models
+            #  perhaps your new model is very complex, with complex internal dependencies
+            #  at this time, maintaining the cache state is rather boring and usually make
+            #  mistakes. To this end, I add the dev mode, that the model only uses
+            #  source sentence and partial target sentence at the cost of slower decoding.
+            # Definitely disabled if you want higher decoding efficiency.
+            decode_target = tf.pad(
+                flat_prev_seqs[:, 1:], [[0, 0], [0, 1]], constant_values=1)
         step_logits, step_state = decoding_fn(
-            flat_prev_seqs[:, -1:], flat_prev_state, time)
+            decode_target, flat_prev_state, time)
+        # add gumbel noise into the logits, simulate gumbel top-k sampling without replacement
+        if params.enable_noise_beam_search:
+            step_logits += util.gumbel_noise(util.shape_list(step_logits))
+        # apply temperature decoding
+        step_logits /= params.beam_search_temperature
         step_log_probs = util.log_prob_from_logits(step_logits)
         vocab_size = util.shape_list(step_log_probs)[-1]
 
         # force decoding
-        eos_mask = tf.to_float(tf.equal(tf.range(vocab_size), eos_id))
-        step_log_probs = tf.cond(tf.to_float(time) < tf.to_float(1.),
-                                 lambda: step_log_probs + tf.expand_dims(eos_mask, 0) * -1e9,
+        eos_mask = tf.cast(tf.equal(tf.range(vocab_size), eos_id), tfdtype)
+        step_log_probs = tf.cond(dtype.tf_to_float(time) < dtype.tf_to_float(1.),
+                                 lambda: step_log_probs + tf.expand_dims(eos_mask, 0) * - dtype.inf(),
                                  lambda: step_log_probs)
 
         # expand to [batch, beam, vocab_size]
@@ -118,7 +166,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         # reducing beam * vocab_size to 2 * beam
         # [batch, beam, 1] + [batch, beam, vocab_size]
         curr_log_probs = tf.expand_dims(prev_log_probs, 2) + step_log_probs
-        length_penality = tf.pow((5.0 + tf.to_float(time + 1)) / 6., alpha)
+        length_penality = tf.pow((5.0 + tf.cast(time + 1, tfdtype)) / 6., alpha)
         curr_scores = curr_log_probs / length_penality
 
         # [batch, beam * vocab_size]
@@ -145,10 +193,9 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             tf.equal(curr_symbol_indices, eos_id),
             # if time step exceeds the maximum decoding length, should stop
             tf.expand_dims(
-                tf.greater_equal(time, tf.to_int32(max_target_length)), 1)
+                tf.greater_equal(time, tf.cast(max_target_length, tf.int32)), 1)
         )
-        alive_scores = topk_scores + \
-                       tf.to_float(curr_fin_flags) * tf.float32.min
+        alive_scores = topk_scores + tf.cast(curr_fin_flags, tfdtype) * tfdtype.min
         # [batch, 2 * beam] -> [batch, beam]
         alive_scores, alive_indices = tf.nn.top_k(alive_scores, beam_size)
         beam_pos = util.batch_coordinates(batch_size, beam_size)
@@ -166,8 +213,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         # reducing 3 * beam to beam
         prev_fin_seq, prev_fin_scores, prev_fin_flags = bsstate.finish
         # [batch, 2 * beam]
-        curr_fin_scores = topk_scores + \
-                          (1.0 - tf.to_float(curr_fin_flags)) * tf.float32.min
+        curr_fin_scores = topk_scores + (1.0 - tf.cast(curr_fin_flags, tfdtype)) * tfdtype.min
         # [batch, 3 * beam]
         fin_flags = tf.concat([prev_fin_flags, curr_fin_flags], axis=1)
         fin_scores = tf.concat([prev_fin_scores, curr_fin_scores], axis=1)

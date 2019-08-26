@@ -12,7 +12,7 @@ from tensorflow.python.training import device_setter
 from tensorflow.python.framework import device as pydev
 from tensorflow.core.framework import node_def_pb2
 
-from utils import util
+from utils import util, dtype
 
 
 def local_device_setter(num_devices=1,
@@ -54,6 +54,27 @@ def _maybe_repeat(x, n):
         return [x] * n
 
 
+def _reshape_output(outputs):
+    # assumption: or outputs[0] are all tensor lists/tuples,
+    #             or outputs[0] are dictionaries
+    if isinstance(outputs[0], (tuple, list)):
+        outputs = list(zip(*outputs))
+        outputs = tuple([list(o) for o in outputs])
+    else:
+        if not isinstance(outputs[0], dict):
+            return outputs
+
+        assert isinstance(outputs[0], dict), \
+            'invalid data type %s' % type(outputs[0])
+
+        combine_outputs = {}
+        for key in outputs[0]:
+            combine_outputs[key] = [o[key] for o in outputs]
+        outputs = combine_outputs
+
+    return outputs
+
+
 # Data-level parallelism
 def data_parallelism(device_type, num_devices, fn, *args, **kwargs):
     # Replicate args and kwargs
@@ -88,84 +109,13 @@ def data_parallelism(device_type, num_devices, fn, *args, **kwargs):
                     num_devices, tc.training.byte_size_load_fn)
             )
 
-        with tf.variable_scope(tf.get_variable_scope(), reuse=bool(i != 0)):
+        with tf.variable_scope(tf.get_variable_scope(), reuse=bool(i != 0),
+                               dtype=tf.as_dtype(dtype.floatx())):
             with tf.name_scope("tower_%d" % i):
                 with tf.device(_device_setter):
                     outputs.append(fns[i](*new_args[i], **new_kwargs[i]))
 
-    # assumption: or outputs[0] are all tensor lists/tuples,
-    #             or outputs[0] are dictionaries
-    if isinstance(outputs[0], (tuple, list)):
-        outputs = list(zip(*outputs))
-        outputs = tuple([list(o) for o in outputs])
-    else:
-        assert isinstance(outputs[0], dict), \
-            'invalid data type %s' % type(outputs[0])
-
-        combine_outputs = {}
-        for key in outputs[0]:
-            combine_outputs[key] = [o[key] for o in outputs]
-        outputs = combine_outputs
-
-    return outputs
-
-
-def fusion_with_mask(datapoints, mask):
-    # combine datas in datapoints into one data by masking
-    while mask.get_shape().ndims < datapoints[0].get_shape().ndims + 1:
-        mask = tf.expand_dims(mask, -1)
-
-    data = tf.reduce_sum(tf.stack(datapoints, 0) * mask)
-    data /= tf.reduce_sum(mask)
-
-    return data
-
-
-def shard_features(features, num_devices):
-    """Split features into several shards according to the given device list
-    :param features: a dictionary containing input datas
-    :param num_devices: gpu device number
-    """
-    num_datashards = num_devices
-
-    sharded_features = {}
-    pieces = util.uniform_splits(tf.shape(features.values()[0])[0],
-                                 num_datashards)
-    device_mask = tf.to_float(tf.greater(pieces, 0))
-
-    # why tile it?
-    # because the piece can be 0-shaped.
-    # feeding an empty input to the model may be problematic.
-    tile_size = tf.cond(tf.reduce_any(tf.equal(device_mask, 0.0)),
-                        lambda: num_datashards,
-                        lambda: 1)
-    tile_pieces = util.uniform_splits(
-        tf.shape(features.values()[0])[0] * tile_size,
-        num_datashards)
-
-    for k, v in features.iteritems():
-        v = tf.convert_to_tensor(v)
-        if not v.shape.as_list():
-            v = tf.expand_dims(v, axis=-1)
-            v = tf.tile(v, [tf.reduce_sum(tile_pieces)])
-        else:
-            # to avoid the empty data input
-            v_shp = util.shape_list(v)
-            t_shp = [1] * len(v_shp)
-            t_shp[0] = tile_size
-            v = tf.tile(v, t_shp)
-        with tf.device(v.device):
-            sharded_features[k] = tf.split(v, tile_pieces, 0)
-
-    datashard_to_features = []
-
-    for d in range(num_datashards):
-        feat = {
-            k: v[d] for k, v in sharded_features.items()
-        }
-        datashard_to_features.append(feat)
-
-    return datashard_to_features, device_mask
+    return _reshape_output(outputs)
 
 
 def parallel_model(model_fn, features, devices, use_cpu=False):
@@ -176,16 +126,27 @@ def parallel_model(model_fn, features, devices, use_cpu=False):
         device_type = 'cpu'
         num_devices = 1
 
-    features, device_mask = shard_features(features, num_devices)
-    outputs = data_parallelism(device_type, num_devices,
-                               model_fn, features)
+    outputs = data_parallelism(device_type, num_devices, model_fn, features)
 
-    return outputs, device_mask
+    return outputs
 
 
 def average_gradients(tower_grads, mask=None):
     """Modified from Bilm"""
+
+    # optimizer for single device
+    if len(tower_grads) == 1:
+        return tower_grads[0]
+
     # calculate average gradient for each shared variable across all GPUs
+    def _deduplicate_indexed_slices(values, indices):
+        """Sums `values` associated with any non-unique `indices`."""
+        unique_indices, new_index_positions = tf.unique(indices)
+        summed_values = tf.unsorted_segment_sum(
+            values, new_index_positions,
+            tf.shape(unique_indices)[0])
+        return summed_values, unique_indices
+
     average_grads = []
     for grad_and_vars in zip(*tower_grads):
         # Note that each grad_and_vars looks like the following:
@@ -200,20 +161,39 @@ def average_gradients(tower_grads, mask=None):
             average_grads.append((g0, v0))
             continue
 
-        # a normal tensor can just do a simple average
-        grads = []
-        for g, v in grad_and_vars:
-            # Add 0 dimension to the gradients to represent the tower.
-            expanded_g = tf.expand_dims(g, 0)
-            # Append on a 'tower' dimension which we will average over
-            grads.append(expanded_g)
+        if isinstance(g0, tf.IndexedSlices):
+            # If the gradient is type IndexedSlices then this is a sparse
+            #   gradient with attributes indices and values.
+            # To average, need to concat them individually then create
+            #   a new IndexedSlices object.
+            indices = []
+            values = []
+            for g, v in grad_and_vars:
+                indices.append(g.indices)
+                values.append(g.values)
+            all_indices = tf.concat(indices, 0)
+            if mask is None:
+                avg_values = tf.concat(values, 0) / len(grad_and_vars)
+            else:
+                avg_values = tf.concat(values, 0) / tf.reduce_sum(mask)
+            # deduplicate across indices
+            av, ai = _deduplicate_indexed_slices(avg_values, all_indices)
+            grad = tf.IndexedSlices(av, ai, dense_shape=g0.dense_shape)
+        else:
+            # a normal tensor can just do a simple average
+            grads = []
+            for g, v in grad_and_vars:
+                # Add 0 dimension to the gradients to represent the tower.
+                expanded_g = tf.expand_dims(g, 0)
+                # Append on a 'tower' dimension which we will average over
+                grads.append(expanded_g)
 
-        # Average over the 'tower' dimension.
-        grad = tf.concat(grads, 0)
-        if mask is not None:
-            grad = tf.boolean_mask(
+            # Average over the 'tower' dimension.
+            grad = tf.concat(grads, 0)
+            if mask is not None:
+                grad = tf.boolean_mask(
                     grad, tf.cast(mask, tf.bool), axis=0)
-        grad = tf.reduce_mean(grad, 0)
+            grad = tf.reduce_mean(grad, 0)
 
         # the Variables are redundant because they are shared
         # across towers. So.. just return the first tower's pointer to

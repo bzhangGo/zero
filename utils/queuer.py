@@ -3,122 +3,125 @@
 """
 The Queue function mainly deals with reading and preparing dataset in a multi-processing manner.
 We didnot use the built-in tensorflow function Dataset because it lacks of flexibility.
-The function defined below is mainly inspired by the Keras.
+The function defined below is mainly inspired by https://github.com/ixlan/machine-learning-data-pipeline.
 """
 
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import six
-import sys
-import threading
-from multiprocessing.pool import ThreadPool
-from contextlib import closing
+from multiprocessing import Process, Queue
 
-try:
-    import queue
-except ImportError:
-    import Queue as queue
-
-# Global variables to be shared across processes.
-_SHARED_GENERATORS = {}
-# Value counter to provide unique id to different processes.
-_GENERATOR_COUNTER = None
+TERMINATION_TOKEN = "<DONE>"
 
 
-def next_sample(uid):
-    return six.next(_SHARED_GENERATORS[uid])
+def create_iter_from_queue(queue, term_token):
+
+    while True:
+        input_data_chunk = queue.get()
+        if input_data_chunk == term_token:
+            # put it back to the queue to let other processes that feed
+            # from the same one to know that they should also break
+            queue.put(term_token)
+            break
+        else:
+            yield input_data_chunk
+
+
+def combine_reader_to_processor(reader, preprocessor):
+    for data_chunk in reader:
+        yield preprocessor(data_chunk)
 
 
 class EnQueuer(object):
-    def __init__(self, generator):
-        """
-        The queue that stores data using multiprocessing or multithreading.
-        :param generator: A iterable batched-data generator, define the __next__ function
-        """
-        self.generator = generator
+    def __init__(self,
+                 reader,
+                 preprocessor,
+                 worker_processes_num=1,
+                 input_queue_size=5,
+                 output_queue_size=5
+                 ):
+        if worker_processes_num < 0:
+            raise ValueError("worker_processes_num must be a "
+                             "non-negative integer.")
 
-        global _GENERATOR_COUNTER
-        if _GENERATOR_COUNTER is None:
-            _GENERATOR_COUNTER = 0
+        self.worker_processes_number = worker_processes_num
+        self.preprocessor = preprocessor
+        self.input_queue_size = input_queue_size
+        self.output_queue_size = output_queue_size
+        self.reader = reader
 
-        self.uid = _GENERATOR_COUNTER
-        _GENERATOR_COUNTER += 1
+    # make the queue iterable
+    def __iter__(self):
+        return self._create_processed_data_chunks_gen(self.reader)
 
-        self.workers = 0
-        self.executor_fn = None
-        self.queue = None
-        self.run_thread = None
-        self.stop_signal = None
+    def _create_processed_data_chunks_gen(self, reader_gen):
+        if self.worker_processes_number == 0:
+            itr = self._create_single_process_gen(reader_gen)
+        else:
+            itr = self._create_multi_process_gen(reader_gen)
+        return itr
 
-    def is_running(self):
-        # whether the queue is working
-        return self.stop_signal is not None and not self.stop_signal.is_set()
+    def _create_single_process_gen(self, data_producer):
+        return combine_reader_to_processor(data_producer, self.preprocessor)
 
-    def _send_generator(self):
-        # Send current Iterable to all workers
-        _SHARED_GENERATORS[self.uid] = self.generator
+    def _create_multi_process_gen(self, reader_gen):
+        term_tokens_received = 0
+        output_queue = Queue(self.output_queue_size)
+        workers = []
 
-    def start(self, workers=1, max_queue_size=10):
-        """
-        Start the handler's worker
-        :param workers: number of worker threads
-        :param max_queue_size: queue size,
-            when full, workers could block on `put()`
-        :return:
-        """
-        self.executor_fn = lambda _: ThreadPool(workers)
+        if self.worker_processes_number > 1:
+            term_tokens_expected = self.worker_processes_number - 1
+            input_queue = Queue(self.input_queue_size)
+            reader_worker = _ParallelWorker(reader_gen, input_queue)
+            workers.append(reader_worker)
 
-        self.workers = workers
-        self.queue = queue.Queue(max_queue_size)
-        self.stop_signal = threading.Event()
-        self.run_thread = threading.Thread(target=self._run)
-        self.run_thread.daemon = True
-        self.run_thread.start()
+            # adding workers that will process the data
+            for _ in range(self.worker_processes_number - 1):
+                # since data-chunks will appear in the queue, making an iterable
+                # object over it
+                queue_iter = create_iter_from_queue(input_queue,
+                                                    TERMINATION_TOKEN)
 
-    def _run(self):
-        # Submit request to the executor and queue the future data
-        self._send_generator()  # share the initial generator
-        with closing(self.executor_fn(_SHARED_GENERATORS)) as executor:
-            while True:
-                if self.stop_signal.is_set():
-                    return
-                self.queue.put(executor.apply_async(next_sample, (self.uid,)), block=True)
+                data_itr = combine_reader_to_processor(queue_iter, self.preprocessor)
+                proc_worker = _ParallelWorker(data_chunk_iter=data_itr,
+                                              queue=output_queue)
+                workers.append(proc_worker)
+        else:
+            term_tokens_expected = 1
 
-    def stop(self, timeout=None):
-        # stop the running threads and wait for them to exist
-        # should be called by the same thread which called `start()`
-        self.stop_signal.set()
-        with self.queue.mutex:
-            self.queue.queue.clear()
-            self.queue.unfinished_tasks = 0
-            self.queue.not_full.notify()
-        self.run_thread.join(timeout)
-        _SHARED_GENERATORS[self.uid] = None
+            data_itr = combine_reader_to_processor(reader_gen, self.preprocessor)
+            proc_worker = _ParallelWorker(data_chunk_iter=data_itr,
+                                          queue=output_queue)
+            workers.append(proc_worker)
 
-    def get(self):
-        # Data fetcher
-        try:
-            while self.is_running():
-                inputs = self.queue.get(block=True).get()
-                self.queue.task_done()
-                if inputs is not None:
-                    yield inputs
-        except StopIteration:
-            # Special case for finite generators
-            last_ones = []
-            while self.queue.qsize() > 0:
-                last_ones.append(self.queue.get(block=True))
-            # wait for them to complete
-            list(map(lambda f: f.wait(), last_ones))
-            # keep the good ones
-            last_ones = [future.get() for future in last_ones if future.successful()]
-            for inputs in last_ones:
-                if inputs is not None:
-                    yield inputs
-        except Exception as e:
-            self.stop()
-            if 'generator already executing' in str(e):
-                raise RuntimeError('your generator is NOT thread-safe')
-            six.reraise(*sys.exc_info())
+        for pr in workers:
+            pr.daemon = True
+            pr.start()
+
+        while True:
+            data_chunk = output_queue.get()
+            if data_chunk == TERMINATION_TOKEN:
+                term_tokens_received += 1
+                # need to received all tokens in order to be sure that
+                # all data has been processed
+                if term_tokens_received == term_tokens_expected:
+                    for pr in workers:
+                        pr.join()
+                    break
+                continue
+            yield data_chunk
+
+
+class _ParallelWorker(Process):
+    """Worker to execute data reading or processing on a separate process."""
+
+    def __init__(self, data_chunk_iter, queue):
+        super(_ParallelWorker, self).__init__()
+        self._data_chunk_iterable = data_chunk_iter
+        self._queue = queue
+
+    def run(self):
+        for data_chunk in self._data_chunk_iterable:
+            self._queue.put(data_chunk)
+        self._queue.put(TERMINATION_TOKEN)

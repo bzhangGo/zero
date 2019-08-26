@@ -16,8 +16,9 @@ class gru(cell.Cell):
     def __init__(self, d, ln=False, scope='gru'):
         super(gru, self).__init__(d, ln=ln, scope=scope)
 
-    def get_init_state(self, shape=None, x=None):
-        return self._get_init_state(self.d, shape=shape, x=x)
+    def get_init_state(self, shape=None, x=None, scope=None):
+        return self._get_init_state(
+            self.d, shape=shape, x=x, scope=scope)
 
     def fetch_states(self, x):
         with tf.variable_scope(

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/../ATR/.idea/ATR.iml" filepath="$PROJECT_DIR$/../ATR/.idea/ATR.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BERT-AAN/.idea/BERT-AAN.iml" filepath="$PROJECT_DIR$/../BERT-AAN/.idea/BERT-AAN.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BERT-AAN-SNLI/.idea/BERT-AAN-SNLI.iml" filepath="$PROJECT_DIR$/../BERT-AAN-SNLI/.idea/BERT-AAN-SNLI.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BERT-Google-SNLI/.idea/BERT-Google-SNLI.iml" filepath="$PROJECT_DIR$/../BERT-Google-SNLI/.idea/BERT-Google-SNLI.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BERT-QATR/.idea/BERT-QATR.iml" filepath="$PROJECT_DIR$/../BERT-QATR/.idea/BERT-QATR.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BiBPE/.idea/BiBPE.iml" filepath="$PROJECT_DIR$/../BiBPE/.idea/BiBPE.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../BoWSentGen/.idea/BoWSentGen.iml" filepath="$PROJECT_DIR$/../BoWSentGen/.idea/BoWSentGen.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../DocCLS/.idea/DocCLS.iml" filepath="$PROJECT_DIR$/../DocCLS/.idea/DocCLS.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../DocNMT/.idea/DocNMT.iml" filepath="$PROJECT_DIR$/../DocNMT/.idea/DocNMT.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../Dummy/.idea/Dummy.iml" filepath="$PROJECT_DIR$/../Dummy/.idea/Dummy.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../InferNet/.idea/InferNet.iml" filepath="$PROJECT_DIR$/../InferNet/.idea/InferNet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../QANet/.idea/QANet.iml" filepath="$PROJECT_DIR$/../QANet/.idea/QANet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../QATR-CLS/.idea/QATR-CLS.iml" filepath="$PROJECT_DIR$/../QATR-CLS/.idea/QATR-CLS.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../RNet/.idea/RNet.iml" filepath="$PROJECT_DIR$/../RNet/.idea/RNet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../Semi-NMT/.idea/Semi-NMT.iml" filepath="$PROJECT_DIR$/../Semi-NMT/.idea/Semi-NMT.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../SeqLBL/.idea/SeqLBL.iml" filepath="$PROJECT_DIR$/../SeqLBL/.idea/SeqLBL.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../TNet/.idea/TNet.iml" filepath="$PROJECT_DIR$/../TNet/.idea/TNet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../doc_bleu/.idea/doc_bleu.iml" filepath="$PROJECT_DIR$/../doc_bleu/.idea/doc_bleu.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../lrn/.idea/lrn.iml" filepath="$PROJECT_DIR$/../lrn/.idea/lrn.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../lrn-cudnn/.idea/lrn-cudnn.iml" filepath="$PROJECT_DIR$/../lrn-cudnn/.idea/lrn-cudnn.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../lstm-pytorch/.idea/lstm-pytorch.iml" filepath="$PROJECT_DIR$/../lstm-pytorch/.idea/lstm-pytorch.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../mlngAE/.idea/mlngAE.iml" filepath="$PROJECT_DIR$/../mlngAE/.idea/mlngAE.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../otem-utem/.idea/otem-utem.iml" filepath="$PROJECT_DIR$/../otem-utem/.idea/otem-utem.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/rnn-seq2seq-nmt.iml" filepath="$PROJECT_DIR$/.idea/rnn-seq2seq-nmt.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../rnn-seq2seq-pytorch/.idea/rnn-seq2seq-pytorch.iml" filepath="$PROJECT_DIR$/../rnn-seq2seq-pytorch/.idea/rnn-seq2seq-pytorch.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../single-transformer-to-nlp/.idea/single-transformer-to-nlp.iml" filepath="$PROJECT_DIR$/../single-transformer-to-nlp/.idea/single-transformer-to-nlp.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../sota-ratr-seq2seq/.idea/sota-ratr-seq2seq.iml" filepath="$PROJECT_DIR$/../sota-ratr-seq2seq/.idea/sota-ratr-seq2seq.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../uaparser/.idea/uaparser.iml" filepath="$PROJECT_DIR$/../uaparser/.idea/uaparser.iml" />
+    </modules>
+  </component>
+</project>

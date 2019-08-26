@@ -6,24 +6,9 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from utils import util
+from utils import util, dtype
+from rnns import get_cell
 from func import linear, additive_attention
-from rnns import gru, lstm, atr, sru
-
-
-def get_cell(cell_name, hidden_size, ln=False, scope=None):
-    """Convert the cell_name into cell instance."""
-    if cell_name.lower() == "gru":
-        return gru.gru(hidden_size, ln=ln, scope=scope or "gru")
-    elif cell_name.lower() == "lstm":
-        return lstm.lstm(hidden_size, ln=ln, scope=scope or "lstm")
-    elif cell_name.lower() == "atr":
-        return atr.atr(hidden_size, ln=ln, scope=scope or "atr")
-    elif cell_name.lower() == "sru":
-        return sru.sru(hidden_size, ln=ln, scope=scope or "sru")
-    else:
-        raise NotImplementedError(
-            "{} is not supported".format(cell_name))
 
 
 def rnn(cell_name, x, d, mask=None, ln=False, init_state=None, sm=True):
@@ -35,6 +20,7 @@ def rnn(cell_name, x, d, mask=None, ln=False, init_state=None, sm=True):
     # ln: whether use layer normalization
     # init_state: the initial hidden states, for cache purpose
     # sm: whether apply swap memory during rnn scan
+    # dp: variational dropout
 
     in_shape = util.shape_list(x)
     batch_size, time_steps = in_shape[:2]
@@ -44,7 +30,7 @@ def rnn(cell_name, x, d, mask=None, ln=False, init_state=None, sm=True):
     if init_state is None:
         init_state = cell.get_init_state(shape=[batch_size])
     if mask is None:
-        mask = tf.ones([batch_size, time_steps], tf.float32)
+        mask = dtype.tf_to_float(tf.ones([batch_size, time_steps]))
 
     # prepare projected input
     cache_inputs = cell.fetch_states(x)
@@ -83,7 +69,7 @@ def rnn(cell_name, x, d, mask=None, ln=False, init_state=None, sm=True):
 
 def cond_rnn(cell_name, x, memory, d, init_state=None,
              mask=None, mem_mask=None, ln=False, sm=True,
-             one2one=False):
+             one2one=False, num_heads=1):
     """Self implemented conditional-RNN procedure, supporting mask trick"""
     # cell_name: gru, lstm or atr
     # x: input sequence embedding matrix, [batch, seq_len, dim]
@@ -95,6 +81,8 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
     # init_state: the initial hidden states, for cache purpose
     # sm: whether apply swap memory during rnn scan
     # one2one: whether the memory is one-to-one mapping for x
+    # num_heads: number of attention heads, multi-head attention
+    # dp: variational dropout
 
     in_shape = util.shape_list(x)
     batch_size, time_steps = in_shape[:2]
@@ -108,9 +96,9 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
     if init_state is None:
         init_state = cell_lower.get_init_state(shape=[batch_size])
     if mask is None:
-        mask = tf.ones([batch_size, time_steps], tf.float32)
+        mask = dtype.tf_to_float(tf.ones([batch_size, time_steps]))
     if mem_mask is None:
-        mem_mask = tf.ones([batch_size, mem_shape[1]], tf.float32)
+        mem_mask = dtype.tf_to_float(tf.ones([batch_size, mem_shape[1]]))
 
     # prepare projected encodes and inputs
     cache_inputs = cell_lower.fetch_states(x)
@@ -124,8 +112,8 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
         cache_memories = [tf.transpose(v, [1, 0, 2])
                           for v in list(cache_memories)]
     mask_ta = tf.transpose(tf.expand_dims(mask, -1), [1, 0, 2])
-    init_context = tf.zeros([batch_size, mem_shape[-1]], tf.float32)
-    init_weight = tf.zeros([batch_size, mem_shape[1]], tf.float32)
+    init_context = dtype.tf_to_float(tf.zeros([batch_size, mem_shape[-1]]))
+    init_weight = dtype.tf_to_float(tf.zeros([batch_size, num_heads, mem_shape[1]]))
     mask_pos = len(cache_inputs)
 
     def _step_fn(prev, x):
@@ -140,14 +128,16 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
         s = m * s + (1. - m) * h_
 
         if not one2one:
-            a, c = additive_attention(
-                cell_lower.get_hidden(s),
-                memory, mem_mask, mem_shape[-1], ln=ln,
+            vle = additive_attention(
+                cell_lower.get_hidden(s), memory, mem_mask,
+                mem_shape[-1], ln=ln, num_heads=num_heads,
                 proj_memory=proj_memories, scope="attention")
+            a, c = vle['weights'], vle['output']
             c_c = cell_higher.fetch_states(c)
         else:
             a = tf.tile(tf.expand_dims(tf.range(time_steps), 0), [batch_size, 1])
-            a = tf.to_float(tf.equal(a, t))
+            a = dtype.tf_to_float(tf.equal(a, t))
+            a = tf.tile(tf.expand_dims(a, 1), [1, num_heads, 1])
             a = tf.reshape(a, tf.shape(init_weight))
 
         h = cell_higher(s, c_c)
@@ -174,8 +164,8 @@ def cond_rnn(cell_name, x, memory, d, init_state=None,
     outputs = tf.transpose(output_ta, [1, 0, 2])
     output_states = outputs[:, -1]
     contexts = tf.transpose(context_ta, [1, 0, 2])
-    attentions = tf.transpose(attention_ta, [1, 0, 2])
+    attentions = tf.transpose(attention_ta, [1, 2, 0, 3])
 
     return (outputs, output_states), \
            (cell_higher.get_hidden(outputs), cell_higher.get_hidden(output_states)), \
-           contexts, attentions
+        contexts, attentions

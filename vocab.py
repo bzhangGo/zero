@@ -70,8 +70,7 @@ class Vocab(object):
         if not append_eos:
             return [self.get_id(token) for token in tokens]
         else:
-            return [self.get_id(token) for token in
-                    tokens + [self.eos_sym]]
+            return [self.get_id(token) for token in tokens + [self.eos_sym]]
 
     def to_tokens(self, ids):
         return [self.get_token(id) for id in ids]
