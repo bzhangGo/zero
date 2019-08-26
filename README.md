@@ -30,7 +30,7 @@ models.
 1. organize the parameters and interpretations in config.
 2. reformat and fulfill code comments
 3. simplify and remove unecessary coding
-4. improve rnn models
+4. improve rnn models 
 
 ## Citation
 
