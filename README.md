@@ -9,15 +9,15 @@ A neural machine translation system implemented by python2 + tensorflow.
 3. Gradient Aggregation 
 
 ## Supported Models
-* RNNSearch: support LSTM, GRU, SRU, [ATR](https://github.com/bzhangGo/ATR), and [LRN](https://github.com/bzhangGo/lrn) 
+* RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
 models.
-* CAEncoder: the context-aware recurrent encoder, see [the paper](https://ieeexplore.ieee.org/document/8031316)
+* CAEncoder: the context-aware recurrent encoder, see [the paper, TASLP](https://ieeexplore.ieee.org/document/8031316)
     and the original [source code](https://github.com/DeepLearnXMU/CAEncoder-NMT) (in Theano).
 * Transformer: [attention is all you need](https://arxiv.org/abs/1706.03762)
-* AAN: the [average attention model](https://github.com/bzhangGo/transformer-aan) that accelerates the decoding!
+* AAN: the [average attention model, ACL2018](https://github.com/bzhangGo/transformer-aan) that accelerates the decoding!
 * Fixup: [Fixup Initialization: Residual Learning Without Normalization](https://arxiv.org/abs/1901.09321)
 * Relative position representation: [Self-Attention with Relative Position Representations](https://arxiv.org/abs/1803.02155)
-* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention]()
+* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention/README.md)
 
 ## Requirements
 * python2.7
@@ -30,6 +30,7 @@ models.
 1. organize the parameters and interpretations in config.
 2. reformat and fulfill code comments
 3. simplify and remove unecessary coding
+4. improve rnn models
 
 ## Citation
 
