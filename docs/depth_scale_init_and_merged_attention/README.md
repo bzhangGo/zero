@@ -1,5 +1,21 @@
 # Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019
 
+
+## Citation
+
+```
+@inproceedings{zhang-titov-sennrich-emnlp19,
+address = "Hong Kong, China",
+author = "Zhang, Biao and Titov, Ivan and Sennrich, Rico",
+booktitle = "{Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and 9th International Joint Conference on Natural Language Processing }",
+publisher = "Association for Computational Linguistics",
+title = "{Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention}",
+year = "2019"
+}
+```
+
+## Idea
+
 This paper focus on improving Deep Transformer. 
 Our empirical observation suggests that simply stacking more Transformer layers makes training divergent.
 Rather than resorting to the pre-norm structure which shifts the layer normalization before modeling blocks,
@@ -64,3 +80,5 @@ test_output=""
 ```
 >If you dislike this long command line, you can also write the parameters into a separate config.py file using
 command like --config config.py. Data in config.py is a simple `dict` object.
+
+More details can be found [here](../usage/README.md).

@@ -1,3 +1,18 @@
+## Questions
+1. What's the effective batch size, training and decoding
+    
+    * When using `token-based` training (batch_or_token=token), the effective token number equals `number_gpus * update_cycles * token_siz`.
+    * When using `batch-based` training (batch_or_token=batch), the effective batch size equals `number_gpus * update_cycles * batch_size`
+    * At decoding phrase, we only use batch-based decoding with size of `eval_batch_size`.
+
+2. What's the difference between `model_name` and `scope_name`
+  
+    The `model_name` means which model you want to train. The model name should be a registered model, which is
+    under the folder `models`. The `scope_name` denotes the scope name in tensorflow for each model weights or variables.
+    
+    For example, when you want to train a Transformer model, you should set `model_name=transformer`. But you can use
+    any valid scope name as you want, such as transformer, nmtmodel, transformer_exp1, .etc.
+
 ## How to use it?
 
 Below is a rough procedure for WMT14 En-De translation tasks.
@@ -30,6 +45,10 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     You can find more information about segmentation [here](https://nlp.stanford.edu/software/segmenter.shtml)*
 
 3. Optional but strongly suggested, Perform BPE decoding
+
+    BPE algorithm is the most popular and currently standard way to handle rare words, or OOVs. It iteratively
+    merges the most frequent patterns until the maximum merging number is reached. It splits rare words into
+    `sub-words`, such as `Bloom` => `Blo@@ om`. Another benefit of BPE is that you can control the size of vocabulary.
 
     - download the [subword project](https://github.com/rsennrich/subword-nmt)
     - learn the subword model:
@@ -71,7 +90,7 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     train your model with the following settings:
     ```
     data_dir=the preprocessed data directory
-    python zero/config.py --mode train --parameters=hidden_size=1024,embed_size=512,\
+    python zero/run.py --mode train --parameters=hidden_size=1024,embed_size=512,\
     dropout=0.1,label_smooth=0.1,\
     max_len=80,batch_size=80,eval_batch_size=240,\
     token_size=3000,batch_or_token='token',\
@@ -112,10 +131,10 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     ```
     python zero/scripts/checkpoint_averaging.py --checkpoints 5 --output avg --path ../train --gpu 0
     ```
-    - The test your model with the following code
+    - Then test your model with the following code
     ```
     data_dir=the preprocessed data directory
-    python zero/config.py --mode test --parameters=hidden_size=1024,embed_size=512,\
+    python zero/run.py --mode test --parameters=hidden_size=1024,embed_size=512,\
     dropout=0.1,label_smooth=0.1,\
     max_len=80,batch_size=80,eval_batch_size=240,\
     token_size=3000,batch_or_token='token',\
@@ -159,5 +178,57 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     heavily relies on the tokenization schema. In fact, tokenization could have a strong influence to the
     final BLEU score, particularly when the aggressive mode is used. However, in current stage, multi-bleu.perl is still
     the most-widely used evaluation script ~~
+   
+7. Command line or Seperate configuration file
+
+    In case you dislike the long command line style, you can convert the parameters into a 
+    separate `config.py`. For the training example, you can convert the running comment into follows:
+    ```
+    python zero/run.py --mode train --config config.py
+    ```
+    where the `config.py` has the following structure:
+    ```
+    dict(
+        hidden_size=1024,
+        embed_size=512,
+        dropout=0.1,
+        label_smooth=0.1,
+        max_len=80,
+        batch_size=80,
+        eval_batch_size=240,
+        token_size=3000,
+        batch_or_token='token',
+        model_name="rnnsearch",
+        buffer_size=3200,
+        clip_grad_norm=5.0,
+        lrate=5e-4,
+        epoches=10,
+        update_cycle=1,
+        gpus=[3],
+        disp_freq=100,
+        eval_freq=10000,
+        sample_freq=1000,
+        checkpoints=5,
+        caencoder=True,
+        cell='atr',
+        max_training_steps=100000000,
+        nthreads=8,
+        swap_memory=True,
+        layer_norm=True,
+        max_queue_size=100,
+        random_seed=1234,
+        src_vocab_file="$data_dir/vocab.en",
+        tgt_vocab_file="$data_dir/vocab.de",
+        src_train_file="$data_dir/train.32k.en.shuf",
+        tgt_train_file="$data_dir/train.32k.de.shuf",
+        src_dev_file="$data_dir/dev.32k.en",
+        tgt_dev_file="$data_dir/dev.32k.de",
+        src_test_file="",
+        tgt_test_file="",
+        output_dir="train",
+        test_output="",
+    )
+    ```
+
 
 And That's it!
