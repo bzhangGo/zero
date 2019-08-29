@@ -82,3 +82,5 @@ test_output=""
 command like --config config.py. Data in config.py is a simple `dict` object.
 
 More details can be found [here](../usage/README.md).
+
+Pretrained models can be found [here](http://data.statmt.org/bzhang/emnlp19_deep_transformer/).
