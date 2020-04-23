@@ -9,7 +9,7 @@ Standard encoder-decoder models for sequence-to-sequence learning feed all encod
 for sequence generation. By contrast, we propose L0Drop which forces model to route information 
 through a subset of the encoder outputs. The subset is learned by L0Drop automatically.
 
-<img src="figures/l0drop.png"  width=500 />
+<img src="l0drop.png"  width=500 />
 
 The figure above shows the difference of L0Drop compared to existing attention models. 
 
@@ -33,7 +33,7 @@ data&task-dependent.
 We suggest first pre-train a normal Transformer model, and then finetune the Transfomer+L0Drop. This could
 save a lot of efforts.
 
-* Step 1. train a normal Transformer model as described [here](docs/usage/README.md)
+* Step 1. train a normal Transformer model as described [here](../../docs/usage/README.md)
 * Step 2. finetune L0Drop using the following command:
 ```
 data_dir=the preprocessed data directory
