@@ -219,6 +219,9 @@ def train(params):
         cum_tokens = []
 
         # restore parameters
+        tf.logging.info("Trying restore pretrained parameters")
+        train_saver.restore(sess, path=params.pretrained_model)
+
         tf.logging.info("Trying restore existing parameters")
         train_saver.restore(sess)
 
@@ -376,8 +379,7 @@ def train(params):
                         # save eval translation
                         evalu.dump_tanslation(
                             tranes,
-                            os.path.join(params.output_dir,
-                                         "eval-{}.trans.txt".format(gstep)),
+                            os.path.join(params.output_dir, "eval-{}.trans.txt".format(gstep)),
                             indices=indices)
 
                         # save parameters
@@ -394,14 +396,9 @@ def train(params):
                                 params.recorder.estop = True
                                 break
 
-                        params.recorder.history_scores.append(
-                            (gstep, float(np.mean(scores)))
-                        )
-                        params.recorder.valid_script_scores.append(
-                            (gstep, float(bleu))
-                        )
-                        params.recorder.save_to_json(
-                            os.path.join(params.output_dir, "record.json"))
+                        params.recorder.history_scores.append((gstep, float(np.mean(scores))))
+                        params.recorder.valid_script_scores.append((gstep, float(bleu)))
+                        params.recorder.save_to_json(os.path.join(params.output_dir, "record.json"))
 
                         # handle the learning rate decay in a typical manner
                         adapt_lr.after_eval(float(bleu))
@@ -465,8 +462,7 @@ def train(params):
     # save eval translation
     evalu.dump_tanslation(
         tranes,
-        os.path.join(params.output_dir,
-                     "eval-{}.trans.txt".format(gstep)),
+        os.path.join(params.output_dir, "eval-{}.trans.txt".format(gstep)),
         indices=indices)
 
     tf.logging.info("Your training is finished :)")

@@ -163,6 +163,8 @@ global_params = tc.training.HParams(
     output_dir="",
     # output during testing
     test_output="",
+    # pretrained modeling
+    pretrained_model="",
 
     # adam optimizer hyperparameters
     beta1=0.9,
@@ -228,6 +230,12 @@ global_params = tc.training.HParams(
     dtype_epsilon=1e-8,
     dtype_inf=1e8,
     loss_scale=1.0,
+
+    # l0drop related parameters
+    l0_norm_reg_scalar=1.0,
+    l0_norm_start_reg_ramp_up=0,
+    l0_norm_end_reg_ramp_up=10000,
+    l0_norm_warm_up=True,
 )
 
 flags = tf.flags

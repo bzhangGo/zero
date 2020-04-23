@@ -1,16 +1,24 @@
 # Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019
 
+[paper](https://www.aclweb.org/anthology/D19-1083/)
 
 ## Citation
 
 ```
-@inproceedings{zhang-titov-sennrich-emnlp19,
-address = "Hong Kong, China",
-author = "Zhang, Biao and Titov, Ivan and Sennrich, Rico",
-booktitle = "{Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and 9th International Joint Conference on Natural Language Processing }",
-publisher = "Association for Computational Linguistics",
-title = "{Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention}",
-year = "2019"
+@inproceedings{zhang-etal-2019-improving-deep,
+    title = "Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention",
+    author = "Zhang, Biao  and
+      Titov, Ivan  and
+      Sennrich, Rico",
+    booktitle = "Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP)",
+    month = nov,
+    year = "2019",
+    address = "Hong Kong, China",
+    publisher = "Association for Computational Linguistics",
+    url = "https://www.aclweb.org/anthology/D19-1083",
+    doi = "10.18653/v1/D19-1083",
+    pages = "898--909",
+    abstract = "The general trend in NLP is towards increasing model capacity and performance via deeper neural networks. However, simply stacking more layers of the popular Transformer architecture for machine translation results in poor convergence and high computational overhead. Our empirical analysis suggests that convergence is poor due to gradient vanishing caused by the interaction between residual connection and layer normalization. We propose depth-scaled initialization (DS-Init), which decreases parameter variance at the initialization stage, and reduces output variance of residual connections so as to ease gradient back-propagation through normalization layers. To address computational cost, we propose a merged attention sublayer (MAtt) which combines a simplified average-based self-attention sublayer and the encoder-decoder attention sublayer on the decoder side. Results on WMT and IWSLT translation tasks with five translation directions show that deep Transformers with DS-Init and MAtt can substantially outperform their base counterpart in terms of BLEU (+1.1 BLEU on average for 12-layer models), while matching the decoding speed of the baseline model thanks to the efficiency improvements of MAtt. Source code for reproduction will be released soon.",
 }
 ```
 

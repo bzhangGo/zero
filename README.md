@@ -18,6 +18,7 @@ models.
 * Fixup: [Fixup Initialization: Residual Learning Without Normalization](https://arxiv.org/abs/1901.09321)
 * Relative position representation: [Self-Attention with Relative Position Representations](https://arxiv.org/abs/1803.02155)
 * [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention/README.md)
+* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop/README.md)
 
 ## Requirements
 * python2.7
