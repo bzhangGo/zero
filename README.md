@@ -1,12 +1,14 @@
 # Zero 
 A neural machine translation system implemented by python2 + tensorflow.
 
-> The project is still under development, and not fully tested. So there may be unknown bugs.
-
 ## Features
 1. Multi-Process Data Loading/Processing (*Problems Exist*)
 2. Multi-GPU Training/Decoding
 3. Gradient Aggregation 
+
+## Papers
+* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop/README.md)
+* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention/README.md)
 
 ## Supported Models
 * RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
@@ -17,8 +19,6 @@ models.
 * AAN: the [average attention model, ACL2018](https://github.com/bzhangGo/transformer-aan) that accelerates the decoding!
 * Fixup: [Fixup Initialization: Residual Learning Without Normalization](https://arxiv.org/abs/1901.09321)
 * Relative position representation: [Self-Attention with Relative Position Representations](https://arxiv.org/abs/1803.02155)
-* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention/README.md)
-* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop/README.md)
 
 ## Requirements
 * python2.7
