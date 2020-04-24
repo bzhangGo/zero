@@ -43,9 +43,6 @@ global_params = tc.training.HParams(
     # cache or dev
     search_mode="cache",
 
-    # relative position encoding
-    max_relative_position=16,
-
     # lrate decay
     # number of shards
     nstable=4,
@@ -89,18 +86,6 @@ global_params = tc.training.HParams(
     model_name="rnnsearch",
     # scope name
     scope_name="rnnsearch",
-    # gru, lstm, sru or atr
-    cell="atr",
-    # whether use caencoder
-    caencoder=True,
-    # whether use layer normalization, it will be slow
-    layer_norm=False,
-    # whether use deep attention mechanism
-    use_deep_att=False,
-    # notice that when opening the swap memory switch
-    # you can train reasonably larger batch on condition
-    # that your system will use much more cpu memory
-    swap_memory=True,
     # filter size for transformer
     filter_size=2048,
     # attention dropout
@@ -111,12 +96,6 @@ global_params = tc.training.HParams(
     num_decoder_layer=6,
     # the number of attention heads
     num_heads=8,
-
-    # average attention network
-    # whether use masked version or cumsum version
-    aan_mask=True,
-    # whether use ffn in the model
-    use_ffn=False,
 
     # allowed maximum sentence length
     max_len=100,
@@ -132,8 +111,12 @@ global_params = tc.training.HParams(
     # whether shuffle batches during training
     shuffle_batch=True,
 
-    # aan generalization
-    strategies=["aan"],
+    # adopt merged attention
+    enable_fuse=True,
+    # enable training deep transformer
+    deep_transformer_init=False,
+    # random online back-trasnalation
+    enable_robt=False,
 
     # whether use multiprocessing deal with data reading, default true
     process_num=1,
@@ -147,6 +130,8 @@ global_params = tc.training.HParams(
     src_vocab_file="",
     # target vocabulary
     tgt_vocab_file="",
+    # target language vocabulary
+    to_lang_vocab_file="",
     # source train file
     src_train_file="",
     # target train file
@@ -192,17 +177,11 @@ global_params = tc.training.HParams(
     # enable safely handle nan
     safe_nan=False,
 
-    # deep nmt prediction style
-    dl4mt_redict=True,
-
     # exponential moving average for stability, disabled by default
     ema_decay=-1.,
 
     # data leak buffer threshold
     data_leak_ratio=0.5,
-
-    # enable training deep transformer
-    deep_transformer_init=False,
 
     # print information every disp_freq training steps
     disp_freq=100,
@@ -230,18 +209,11 @@ global_params = tc.training.HParams(
     dtype_epsilon=1e-8,
     dtype_inf=1e8,
     loss_scale=1.0,
-
-    # l0drop related parameters
-    l0_norm_reg_scalar=1.0,
-    l0_norm_start_reg_ramp_up=0,
-    l0_norm_end_reg_ramp_up=10000,
-    l0_norm_warm_up=True,
 )
 
 flags = tf.flags
 flags.DEFINE_string("config", "", "Additional Mergable Parameters")
 flags.DEFINE_string("parameters", "", "Command Line Refinable Parameters")
-flags.DEFINE_string("ensemble_dirs", "", "Model directory for ensemble")
 flags.DEFINE_string("name", "model", "Description of the training process for distinguishing")
 flags.DEFINE_string("mode", "train", "train or test or ensemble")
 
@@ -319,49 +291,6 @@ def main(_):
     # load registered models
     util.dynamic_load_module(models, prefix="models")
 
-    # dealing with model ensemble
-    if flags.FLAGS.mode == "ensemble":
-        all_params = []
-
-        # different models are separated by comma ;
-        model_dirs = flags.FLAGS.ensemble_dirs.split(";")
-        for midx, model_dir in enumerate(model_dirs):
-            # parameters from saved model
-            params = copy.deepcopy(global_params)
-
-            # priority: command line > saver > default
-            params.parse(flags.FLAGS.parameters)
-            if os.path.exists(flags.FLAGS.config):
-                params.override_from_dict(eval(open(flags.FLAGS.config).read()))
-            params = load_parameters(params, model_dir)
-            # override
-            if os.path.exists(flags.FLAGS.config):
-                params.override_from_dict(eval(open(flags.FLAGS.config).read()))
-            params.parse(flags.FLAGS.parameters)
-
-            # modify the output directory based on model_dir :)
-            params.output_dir = os.path.abspath(model_dir)
-
-            # loading vocabulary
-            tf.logging.info("Begin Loading Vocabulary")
-            start_time = time.time()
-            params.src_vocab = Vocab(params.src_vocab_file)
-            params.tgt_vocab = Vocab(params.tgt_vocab_file)
-            tf.logging.info("End Loading Vocabulary, Source Vocab Size {}, "
-                            "Target Vocab Size {}, within {} seconds"
-                            .format(params.src_vocab.size(), params.tgt_vocab.size(),
-                                    time.time() - start_time))
-
-            # print parameters
-            tf.logging.info("Parameters of {}-th model".format(midx))
-            print_parameters(params)
-
-            all_params.append(params)
-
-        graph.ensemble(all_params)
-
-        return "Over"
-
     params = global_params
 
     # try loading parameters
@@ -385,9 +314,10 @@ def main(_):
     start_time = time.time()
     params.src_vocab = Vocab(params.src_vocab_file)
     params.tgt_vocab = Vocab(params.tgt_vocab_file)
+    params.to_lang_vocab = Vocab(params.to_lang_vocab_file)
     tf.logging.info("End Loading Vocabulary, Source Vocab Size {}, "
-                    "Target Vocab Size {}, within {} seconds"
-                    .format(params.src_vocab.size(), params.tgt_vocab.size(),
+                    "Target Vocab Size {}, Target Language Size {}, within {} seconds"
+                    .format(params.src_vocab.size(), params.tgt_vocab.size(), params.to_lang_vocab.size(),
                             time.time() - start_time))
 
     # print parameters

@@ -7,7 +7,6 @@ from __future__ import print_function
 import math
 import tensorflow as tf
 
-from modules import rpr
 from utils import util, dtype
 
 
@@ -163,9 +162,7 @@ def additive_attention(query, memory, mem_mask, hidden_size,
 
 def dot_attention(query, memory, mem_mask, hidden_size,
                   ln=False, num_heads=1, cache=None, dropout=None,
-                  use_relative_pos=False, max_relative_position=16,
-                  out_map=True, scope=None, fuse_mask=None,
-                  decode_step=None):
+                  out_map=True, scope=None, fuse_mask=None):
     """
     dotted attention model
     :param query: [batch_size, qey_len, dim]
@@ -178,9 +175,6 @@ def dot_attention(query, memory, mem_mask, hidden_size,
     :param out_map: output additional mapping
     :param cache: cache-based decoding
     :param fuse_mask: aan mask during training, and timestep for testing
-    :param max_relative_position: maximum position considered for relative embedding
-    :param use_relative_pos: whether use relative position information
-    :param decode_step: the time step of current decoding, 0-based
     :param scope:
     :return: a value matrix, [batch_size, qey_len, mem_dim]
     """
@@ -188,8 +182,6 @@ def dot_attention(query, memory, mem_mask, hidden_size,
                            dtype=tf.as_dtype(dtype.floatx())):
         if fuse_mask is not None:
             assert memory is not None, 'Fuse mechanism only applied with cross-attention'
-        if cache and use_relative_pos:
-            assert decode_step is not None, 'Decode Step must provide when use relative position encoding'
 
         if memory is None:
             # suppose self-attention from queries alone
@@ -221,21 +213,8 @@ def dot_attention(query, memory, mem_mask, hidden_size,
 
         q *= (hidden_size // num_heads) ** (-0.5)
 
-        q_shp = util.shape_list(q)
-        k_shp = util.shape_list(k)
-        v_shp = util.shape_list(v)
-
-        q_len = q_shp[2] if decode_step is None else decode_step + 1
-        r_lst = None if decode_step is None else 1
-
         # q * k => attention weights
-        if use_relative_pos:
-            r = rpr.get_relative_positions_embeddings(
-                q_len, k_shp[2], k_shp[3],
-                max_relative_position, name="rpr_keys", last=r_lst)
-            logits = rpr.relative_attention_inner(q, k, r, transpose=True)
-        else:
-            logits = tf.matmul(q, k, transpose_b=True)
+        logits = tf.matmul(q, k, transpose_b=True)
 
         if mem_mask is not None:
             logits += mem_mask
@@ -245,13 +224,7 @@ def dot_attention(query, memory, mem_mask, hidden_size,
         dweights = util.valid_apply_dropout(weights, dropout)
 
         # weights * v => attention vectors
-        if use_relative_pos:
-            r = rpr.get_relative_positions_embeddings(
-                q_len, k_shp[2], v_shp[3],
-                max_relative_position, name="rpr_values", last=r_lst)
-            o = rpr.relative_attention_inner(dweights, v, r, transpose=False)
-        else:
-            o = tf.matmul(dweights, v)
+        o = tf.matmul(dweights, v)
 
         o = combine_heads(o)
 
@@ -286,7 +259,7 @@ def dot_attention(query, memory, mem_mask, hidden_size,
         return results
 
 
-def layer_norm(x, eps=None, scope=None):
+def layer_norm(x, lang=None, lang_size=None, eps=None, scope=None):
     """Layer normalization layer"""
     if eps is None:
         eps = dtype.epsilon()
@@ -294,8 +267,19 @@ def layer_norm(x, eps=None, scope=None):
                            dtype=tf.as_dtype(dtype.floatx())):
         layer_size = util.shape_list(x)[-1]
 
-        scale = tf.get_variable("scale", [layer_size], initializer=tf.ones_initializer())
-        offset = tf.get_variable("offset", [layer_size], initializer=tf.zeros_initializer())
+        if lang is None:
+            scale = tf.get_variable("scale", [layer_size],
+                                    initializer=tf.ones_initializer())
+            offset = tf.get_variable("offset", [layer_size],
+                                     initializer=tf.zeros_initializer())
+        else:
+            scale = tf.get_variable("scale", [lang_size, layer_size],
+                                    initializer=tf.ones_initializer())
+            offset = tf.get_variable("offset", [lang_size, layer_size],
+                                     initializer=tf.zeros_initializer())
+
+            scale = tf.reshape(tf.gather(scale, lang), [-1, 1, layer_size])
+            offset = tf.reshape(tf.gather(offset, lang), [-1, 1, layer_size])
 
         mean = tf.reduce_mean(x, -1, keep_dims=True)
         var = tf.reduce_mean((x - mean) ** 2, -1, keep_dims=True)

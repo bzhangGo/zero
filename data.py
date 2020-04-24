@@ -10,13 +10,14 @@ from utils.util import batch_indexer, token_indexer
 
 class Dataset(object):
     def __init__(self, src_file, tgt_file,
-                 src_vocab, tgt_vocab, max_len=100,
+                 src_vocab, tgt_vocab, lang_vocab, max_len=100,
                  batch_or_token='batch',
                  data_leak_ratio=0.5):
         self.source = src_file
         self.target = tgt_file
         self.src_vocab = src_vocab
         self.tgt_vocab = tgt_vocab
+        self.lang_vocab = lang_vocab
         self.max_len = max_len
         self.batch_or_token = batch_or_token
         self.data_leak_ratio = data_leak_ratio
@@ -39,9 +40,13 @@ class Dataset(object):
                 if src_line == "" or tgt_line == "":
                     continue
 
+                # add to_lang part, which indicates the target language this source input should be translated into.
+                to_lang = self.lang_vocab.get_id(src_line.split()[0])
+
                 yield (
                     self.src_vocab.to_id(src_line.strip().split()[:self.max_len]),
-                    self.tgt_vocab.to_id(tgt_line.strip().split()[:self.max_len])
+                    self.tgt_vocab.to_id(tgt_line.strip().split()[:self.max_len]),
+                    to_lang,
                 )
 
     def to_matrix(self, batch):
@@ -55,14 +60,17 @@ class Dataset(object):
 
         s = np.zeros([batch_size, src_len], dtype=np.int32)
         t = np.zeros([batch_size, tgt_len], dtype=np.int32)
+        y = np.zeros([batch_size], dtype=np.int32)
         x = []
         for eidx, sample in enumerate(batch):
             x.append(sample[0])
-            src_ids, tgt_ids = sample[1], sample[2]
+            src_ids, tgt_ids, to_lang = sample[1], sample[2], sample[3]
 
             s[eidx, :min(src_len, len(src_ids))] = src_ids[:src_len]
             t[eidx, :min(tgt_len, len(tgt_ids))] = tgt_ids[:tgt_len]
-        return x, s, t
+            y[eidx] = to_lang
+
+        return x, s, t, y
 
     def batcher(self, size, buffer_size=1000, shuffle=True, train=True):
         def _handle_buffer(_buffer):
@@ -81,18 +89,19 @@ class Dataset(object):
             for ioi in index_over_index:
                 index = buffer_index[ioi[0]]
                 batch = [sorted_buffer[ii] for ii in index]
-                x, s, t = self.to_matrix(batch)
+                x, s, t, y = self.to_matrix(batch)
                 yield {
                     'src': s,
                     'tgt': t,
                     'index': x,
+                    'to_lang': y,
                     'raw': batch,
                 }
 
         buffer = self.leak_buffer
         self.leak_buffer = []
-        for i, (src_ids, tgt_ids) in enumerate(self.load_data()):
-            buffer.append((i, src_ids, tgt_ids))
+        for i, (src_ids, tgt_ids, to_lang) in enumerate(self.load_data()):
+            buffer.append((i, src_ids, tgt_ids, to_lang))
             if len(buffer) >= buffer_size:
                 for data in _handle_buffer(buffer):
                     # check whether the data is tailed

@@ -25,9 +25,9 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
     batch_size = tf.shape(features["source"])[0]
     if params.search_mode == "cache":
-        model_state = encoding_fn(features["source"])
+        model_state = encoding_fn(features["source"], features["to_lang"])
     else:
-        model_state = features["source"]
+        model_state = {"source": features["source"], "to_lang": features["to_lang"]}
 
     src_mask = dtype.tf_to_float(tf.cast(features["source"], tf.bool))
     source_length = tf.reduce_sum(src_mask, -1)
@@ -63,7 +63,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             state
         )
         _, step_state = decoding_fn(
-            flat_prev_seqs[:, -1:], flat_prev_state, 0)
+            flat_prev_seqs[:, -1:], flat_prev_state["to_lang"], flat_prev_state, 0)
 
         new_state = nest.map_structure(
             lambda x: util.unmerge_neighbor_dims(x, batch_size, axis=0),
@@ -138,8 +138,13 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             # Definitely disabled if you want higher decoding efficiency.
             decode_target = tf.pad(
                 flat_prev_seqs[:, 1:], [[0, 0], [0, 1]], constant_values=1)
-        step_logits, step_state = decoding_fn(
-            decode_target, flat_prev_state, time)
+        if params.search_mode == "cache":
+            step_logits, step_state = decoding_fn(
+                decode_target, flat_prev_state["to_lang"], flat_prev_state, time)
+        else:
+            step_logits, step_state = decoding_fn(
+                decode_target, flat_prev_state["to_lang"], flat_prev_state["source"], time)
+
         # add gumbel noise into the logits, simulate gumbel top-k sampling without replacement
         if params.enable_noise_beam_search:
             step_logits += util.gumbel_noise(util.shape_list(step_logits))

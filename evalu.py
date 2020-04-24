@@ -71,6 +71,7 @@ def decoding(session, features, out_seqs, out_scores, dataset, params):
             # define feed_dict
             _feed_dict = {
                 features[fidx]["source"]: shard_data['src'],
+                features[fidx]["to_lang"]: shard_data['to_lang'],
             }
             feed_dicts.update(_feed_dict)
 
@@ -167,6 +168,7 @@ def scoring(session, features, out_scores, dataset, params):
             _feed_dict = {
                 features[fidx]["source"]: shard_data['src'],
                 features[fidx]["target"]: shard_data['tgt'],
+                features[fidx]["to_lang"]: shard_data['to_lang'],
             }
             feed_dicts.update(_feed_dict)
 

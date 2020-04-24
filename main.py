@@ -62,59 +62,6 @@ def tower_infer_graph(eval_features, graph, params):
     return eval_seqs, eval_scores
 
 
-def tower_ensemble_graph(eval_features, total_graphs, total_params):
-    default_params = total_params[0]
-
-    # define multi-gpu inferring graph
-    def _tower_infer_graph(features):
-        infer_fns = []
-        for midx, (graph, params) in enumerate(zip(total_graphs, total_params)):
-            params = copy.copy(params)
-            params.scope_name = params.scope_name + "_ensembler_%d" % midx
-            infer_fns.append(graph.infer_fn(params))
-
-        total_encoding_fns, total_decoding_fns = list(zip(*infer_fns))
-
-        def _encoding_fn(source):
-            model_state = {}
-            for _midx in range(len(total_encoding_fns)):
-                current_model_state = total_encoding_fns[_midx](source)
-                model_state['ensembler_%d' % _midx] = current_model_state
-            return model_state
-
-        def _decoding_fn(target, model_state, time):
-            pred_logits = []
-
-            for _midx in range(len(total_decoding_fns)):
-                state_describ = "ensembler_%d" % _midx
-                if default_params.search_mode == "cache":
-                    current_output = total_decoding_fns[_midx](target, model_state[state_describ], time)
-                else:
-                    current_output = total_decoding_fns[_midx](target, model_state, time)
-                step_logits, step_state = current_output
-
-                pred_logits.append(step_logits)
-
-                if default_params.search_mode == "cache":
-                    model_state[state_describ] = step_state
-
-            model_logits = tf.add_n([tf.nn.softmax(logits) for logits in pred_logits]) / len(pred_logits)
-
-            return tf.log(model_logits), model_state
-
-        beam_output = beam_search(features, _encoding_fn, _decoding_fn, default_params)
-
-        return beam_output
-
-    # feed model to multiple gpus
-    eval_outputs = parallel.parallel_model(
-        _tower_infer_graph, eval_features,
-        default_params.gpus, use_cpu=(len(default_params.gpus) == 0))
-    eval_seqs, eval_scores = eval_outputs['seq'], eval_outputs['score']
-
-    return eval_seqs, eval_scores
-
-
 def tower_score_graph(eval_features, graph, params):
     # define multi-gpu inferring graph
     def _tower_infer_graph(features):
@@ -130,6 +77,98 @@ def tower_score_graph(eval_features, graph, params):
     return eval_scores
 
 
+# random online back-translation
+def backtranslate(sess, data_on_gpu, eval_seqs, eval_scores, features, params):
+    # back-translation procedure
+    # sentence pair: (LANG source sentence, target sentence)
+    # 0. randomly sample a language: <2lang> (<2lang> != LANG)
+    # 1. target sentence => <2lang> target sentence
+    # 2. <2lang> target sentence =>MT=> trans' source sentence
+    # 3. trans' source sentence => LANG trans' source sentence
+    # 4. (LANG trans' source sentence, target sentence)
+
+    def assign_random_lang_id(source, target):
+        tgt_lang = source[:, 0]
+
+        vocab_lang = params.to_lang_vocab
+        vocab_src = params.src_vocab
+        vocab_tgt = params.tgt_vocab
+
+        fake_lang = []
+        fake_to_lang = []
+        for lang in tgt_lang:
+            select_lang = lang
+            select_to_lang = None
+            while select_lang == lang:
+                # 3 => three special tokens in our vocabulary, useless here
+                rand_id = np.random.randint(vocab_lang.size() - 3) + 3
+                rand_token = vocab_lang.get_token(rand_id)
+                select_lang = vocab_src.get_id(rand_token)
+                select_to_lang = rand_id
+            assert select_to_lang is not None
+            fake_lang.append(select_lang)
+            fake_to_lang.append(select_to_lang)
+
+        fake_source = []
+        for lang, tgt in zip(fake_lang, target):
+            tgt_tokens = vocab_tgt.to_tokens(list(tgt))
+            src_ids = vocab_src.to_id(tgt_tokens, append_eos=False)
+            src_sample = [lang] + src_ids
+            fake_source.append(src_sample)
+        fake_source = np.asarray(fake_source, dtype=np.int32)
+        fake_to_lang = np.asarray(fake_to_lang, dtype=np.int32)
+
+        return fake_source, fake_to_lang
+
+    def assign_backtrans(source, target, trans):
+        tgt_lang = source[:, 0]
+        trans = trans[:, 0, :]
+
+        vocab_lang = params.to_lang_vocab
+        vocab_src = params.src_vocab
+        vocab_tgt = params.tgt_vocab
+
+        back_source = []
+        for lang, tgt in zip(tgt_lang, trans):
+            tgt_tokens = vocab_tgt.to_tokens(list(tgt))
+            src_ids = vocab_src.to_id(tgt_tokens, append_eos=False)
+            src_sample = [lang] + src_ids
+            back_source.append(src_sample)
+        back_source = np.asarray(back_source, dtype=np.int32)
+
+        return back_source, target
+
+    # data feeding to gpu placeholders
+    feed_dicts = {}
+    for fidx, shard_data in enumerate(data_on_gpu):
+        # define feed_dict
+        fake_source, fake_to_lang = assign_random_lang_id(shard_data["src"], shard_data["tgt"])
+        feed_dict = {
+            features[fidx]["source"]: fake_source,
+            features[fidx]["to_lang"]: fake_to_lang,
+        }
+        feed_dicts.update(feed_dict)
+
+    # perform online decoding, greedy with beam-size of 1
+    tf.logging.info("Start Online Decoding")
+    decode_seqs, decode_scores = sess.run(
+        [eval_seqs, eval_scores], feed_dict=feed_dicts)
+
+    # prepare back into the gpu placeholder for back-training
+    feed_dicts = {}
+    for fidx, (shard_data, trans_data) in enumerate(zip(data_on_gpu, decode_seqs)):
+        # define feed_dict
+        source, target = assign_backtrans(shard_data["src"], shard_data["tgt"], trans_data)
+        feed_dict = {
+            features[fidx]["source"]: source,
+            features[fidx]["target"]: target,
+            features[fidx]["to_lang"]: shard_data["to_lang"],
+        }
+        feed_dicts.update(feed_dict)
+
+    return feed_dicts
+
+
 def train(params):
     # status measure
     if params.recorder.estop or \
@@ -142,11 +181,11 @@ def train(params):
     tf.logging.info("Begin Loading Training and Dev Dataset")
     start_time = time.time()
     train_dataset = Dataset(params.src_train_file, params.tgt_train_file,
-                            params.src_vocab, params.tgt_vocab, params.max_len,
+                            params.src_vocab, params.tgt_vocab, params.to_lang_vocab, params.max_len,
                             batch_or_token=params.batch_or_token,
                             data_leak_ratio=params.data_leak_ratio)
     dev_dataset = Dataset(params.src_dev_file, params.src_dev_file,
-                          params.src_vocab, params.src_vocab, params.eval_max_len,
+                          params.src_vocab, params.src_vocab, params.to_lang_vocab, params.eval_max_len,
                           batch_or_token='batch',
                           data_leak_ratio=params.data_leak_ratio)
     tf.logging.info(
@@ -162,6 +201,7 @@ def train(params):
             feature = {
                 "source": tf.placeholder(tf.int32, [None, None], "source"),
                 "target": tf.placeholder(tf.int32, [None, None], "target"),
+                "to_lang": tf.placeholder(tf.int32, [None], "target_language"),
             }
             features.append(feature)
 
@@ -197,6 +237,13 @@ def train(params):
 
         # set up infer graph
         eval_seqs, eval_scores = tower_infer_graph(features, graph, params)
+
+        # apply online back-traslation
+        if params.enable_robt:
+            greedy_params = copy.copy(params)
+            greedy_params.beam_size = 1
+            greedy_params.decode_length = 0
+            greedy_eval_seqs, greedy_eval_scores = tower_infer_graph(features, graph, greedy_params)
 
         tf.logging.info("End Building Inferring Graph, within {} seconds".format(time.time() - start_time))
 
@@ -289,6 +336,7 @@ def train(params):
                     feed_dict = {
                         features[fidx]["source"]: shard_data["src"],
                         features[fidx]["target"]: shard_data["tgt"],
+                        features[fidx]["to_lang"]: shard_data["to_lang"],
                         lr: adapt_lr.get_lr(),
                     }
                     feed_dicts.update(feed_dict)
@@ -296,6 +344,8 @@ def train(params):
                     # collect target tokens
                     cum_tokens.append(np.sum(shard_data['tgt'] > 0))
 
+                # data for back-translation
+                data_on_back = data_on_gpu
                 # reset data points on gpus
                 data_on_gpu = []
 
@@ -303,9 +353,23 @@ def train(params):
                 if cycle_counter < params.update_cycle:
                     sess.run(ops["collect_op"], feed_dict=feed_dicts)
 
+                    # random online backtranslation
+                    if params.enable_robt:
+                        feed_dicts = backtranslate(
+                            sess, data_on_back, greedy_eval_seqs, greedy_eval_scores, features, params)
+                        feed_dicts[lr] = adapt_lr.get_lr()
+                        sess.run(ops["collect_op"], feed_dict=feed_dicts)
+
                 # at the final step, update model parameters
                 if cycle_counter == params.update_cycle:
                     cycle_counter = 0
+
+                    # random online backtranslation
+                    if params.enable_robt:
+                        sess.run(ops["collect_op"], feed_dict=feed_dicts)
+                        feed_dicts = backtranslate(
+                            sess, data_on_back, greedy_eval_seqs, greedy_eval_scores, features, params)
+                        feed_dicts[lr] = adapt_lr.get_lr()
 
                     # directly update parameters, usually this works well
                     if not params.safe_nan:
@@ -407,7 +471,8 @@ def train(params):
                     if gstep > 0 and gstep % params.sample_freq == 0:
                         tf.logging.info("Start Sampling")
                         decode_seqs, decode_scores = sess.run(
-                            [eval_seqs[:1], eval_scores[:1]], feed_dict={features[0]["source"]: data["src"][:5]})
+                            [eval_seqs[:1], eval_scores[:1]], feed_dict={features[0]["source"]: data["src"][:5],
+                                                                         features[0]["to_lang"]: data["to_lang"][:5]})
                         tranes, scores = evalu.decode_hypothesis(decode_seqs, decode_scores, params)
 
                         for sidx in range(min(5, len(scores))):
@@ -475,7 +540,7 @@ def evaluate(params):
     tf.logging.info("Begin Loading Test Dataset")
     start_time = time.time()
     test_dataset = Dataset(params.src_test_file, params.src_test_file,
-                           params.src_vocab, params.src_vocab, params.eval_max_len,
+                           params.src_vocab, params.src_vocab, params.to_lang_vocab, params.eval_max_len,
                            batch_or_token='batch',
                            data_leak_ratio=params.data_leak_ratio)
     tf.logging.info(
@@ -487,6 +552,7 @@ def evaluate(params):
         for fidx in range(max(len(params.gpus), 1)):
             feature = {
                 "source": tf.placeholder(tf.int32, [None, None], "source"),
+                "to_lang": tf.placeholder(tf.int32, [None], "target_language"),
             }
             features.append(feature)
 
@@ -550,7 +616,7 @@ def scorer(params):
     tf.logging.info("Begin Loading Test Dataset")
     start_time = time.time()
     test_dataset = Dataset(params.src_test_file, params.tgt_test_file,
-                           params.src_vocab, params.tgt_vocab, params.eval_max_len,
+                           params.src_vocab, params.tgt_vocab, params.to_lang_vocab, params.eval_max_len,
                            batch_or_token='batch',
                            data_leak_ratio=params.data_leak_ratio)
     tf.logging.info(
@@ -563,6 +629,7 @@ def scorer(params):
             feature = {
                 "source": tf.placeholder(tf.int32, [None, None], "source"),
                 "target": tf.placeholder(tf.int32, [None, None], "target"),
+                "to_lang": tf.placeholder(tf.int32, [None], "target_language"),
             }
             features.append(feature)
 
@@ -618,130 +685,3 @@ def scorer(params):
         evalu.dump_tanslation(scores, params.test_output)
 
     return np.mean(scores)
-
-
-def ensemble(total_params):
-    # loading dataset
-    tf.logging.info("Begin Loading Test Dataset")
-    start_time = time.time()
-    # assume that different configurations use the same test file
-    default_params = total_params[0]
-    # assume that different models share the same source and target vocabulary, usually it's the case
-    test_dataset = Dataset(default_params.src_test_file, default_params.src_test_file,
-                           default_params.src_vocab, default_params.src_vocab, default_params.eval_max_len,
-                           batch_or_token='batch',
-                           data_leak_ratio=default_params.data_leak_ratio)
-    tf.logging.info(
-        "End Loading dataset, within {} seconds".format(time.time() - start_time))
-
-    # Build Graph
-    with tf.Graph().as_default():
-        features = []
-        for fidx in range(max(len(default_params.gpus), 1)):
-            feature = {
-                "source": tf.placeholder(tf.int32, [None, None], "source"),
-            }
-            features.append(feature)
-
-        # session info
-        sess = util.get_session(default_params.gpus)
-
-        tf.logging.info("Begining Building Evaluation Graph")
-        start_time = time.time()
-
-        # get graph
-        total_graphs = [model.get_model(params.model_name) for params in total_params]
-
-        # set up infer graph
-        eval_seqs, eval_scores = tower_ensemble_graph(features, total_graphs, total_params)
-
-        tf.logging.info("End Building Inferring Graph, within {} seconds".format(time.time() - start_time))
-
-        # set up ema
-        # collect ema variables
-        ema_used_models = {}
-        for midx, params in enumerate(total_params):
-            if params.ema_decay > 0.:
-                ema_used_models[params.scope_name + "_ensembler_%d" % midx] = []
-
-        for var in tf.trainable_variables():
-            name = var.op.name
-
-            key = name[:name.find('/')]
-
-            if key in ema_used_models:
-                ema_used_models[key].append(var)
-
-        ema_assign_list = [tf.no_op()]
-        for midx, params in enumerate(total_params):
-            if params.ema_decay > 0.:
-                key = params.scope_name + "_ensembler_%d" % midx
-
-                ema = tf.train.ExponentialMovingAverage(decay=params.ema_decay)
-                ema.apply(ema_used_models[key])
-                ema_assign_list += [tf.assign(var, ema.average(var).read_value()) for var in ema_used_models[key]]
-        ema_assign_op = tf.group(*ema_assign_list)
-
-        # initialize the model
-        sess.run(tf.global_variables_initializer())
-
-        # log parameters
-        util.variable_printer()
-
-        # restore parameters
-        tf.logging.info("Trying restore existing parameters")
-        all_var_list = {}
-        for midx, params in enumerate(total_params):
-            checkpoint = os.path.join(params.output_dir, "checkpoint")
-            assert tf.gfile.Exists(checkpoint)
-
-            latest_checkpoint = tf.gfile.Open(checkpoint).readline()
-            model_name = latest_checkpoint.strip().split(":")[1].strip()
-            model_name = model_name[1:-1]  # remove ""
-            model_path = os.path.join(params.output_dir, model_name)
-            model_path = os.path.abspath(model_path)
-
-            assert tf.gfile.Exists(model_path + ".meta")
-
-            tf.logging.warn("Starting Backup Restore {}-th Model".format(midx))
-
-            reader = tf.train.load_checkpoint(model_path)
-
-            # adapt the model names
-            for name, shape in tf.train.list_variables(model_path):
-                model_name = name.split('/')[0]
-                ensemble_name = "{}_ensembler_{}/{}".format(model_name, midx, name[name.find('/') + 1:])
-                all_var_list[ensemble_name] = reader.get_tensor(name)
-
-        ops = []
-        for var in tf.global_variables():
-            name = var.op.name
-
-            if name in all_var_list:
-                tf.logging.info('{} **Good**'.format(name))
-                ops.append(
-                    tf.assign(var, all_var_list[name])
-                )
-            else:
-                tf.logging.warn("{} --Bad--".format(name))
-        restore_op = tf.group(*ops, name="restore_global_vars")
-
-        sess.run(restore_op)
-        sess.run(ema_assign_op)
-
-        tf.logging.info("Starting Evaluating")
-        eval_start_time = time.time()
-        tranes, scores, indices = evalu.decoding(sess, features, eval_seqs, eval_scores, test_dataset, default_params)
-        bleu = evalu.eval_metric(tranes, default_params.tgt_test_file, indices=indices)
-        eval_end_time = time.time()
-
-        tf.logging.info(
-            "{} Scores {}, BLEU {}, Duration {}s".format(
-                util.time_str(eval_end_time),
-                        np.mean(scores), bleu, eval_end_time - eval_start_time)
-        )
-
-        # save translation
-        evalu.dump_tanslation(tranes, default_params.test_output, indices=indices)
-
-    return bleu

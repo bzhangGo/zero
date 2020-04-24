@@ -12,12 +12,19 @@ from models import model
 from utils import util, dtype
 
 
-# Implementation of Average Attention Network from:
-# Accelerating Neural Transformer via an Average Attention Network
-# http://aclweb.org/anthology/P18-1166
+def lang_mapper(x, to_lang, lang_size):
+    """Mapping x with language-specific modeling"""
+    x_size = util.shape_list(x)[-1]
+    # we tried to relax this mapping by factoring this matrix, but not work
+    W_lang = tf.get_variable("lang_mapper", [lang_size, x_size * x_size])
+
+    W = tf.reshape(tf.gather(W_lang, to_lang), [-1, x_size, x_size])
+    o = tf.einsum('bsi,bij->bsj', x, W)
+
+    return o
 
 
-def encoder(source, params):
+def encoder(source, to_lang, params):
     mask = dtype.tf_to_float(tf.cast(source, tf.bool))
     hidden_size = params.hidden_size
     initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
@@ -60,7 +67,8 @@ def encoder(source, params):
 
                     y = y['output']
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
-                    x = func.layer_norm(x)
+                    # language-aware layer normalization
+                    x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
 
                 with tf.variable_scope("feed_forward"):
                     y = func.ffn_layer(
@@ -71,7 +79,11 @@ def encoder(source, params):
                     )
 
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
-                    x = func.layer_norm(x)
+                    # language-aware layer normalization
+                    x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
+
+        # language-aware layer mapping
+        x = lang_mapper(x, to_lang, params.to_lang_vocab.size())
 
     source_encodes = x
     x_shp = util.shape_list(x)
@@ -80,44 +92,20 @@ def encoder(source, params):
         "encodes": source_encodes,
         "decoder_initializer": {
             "layer_{}".format(l): {
-                # plan aan
+                # for fusion
                 "aan": dtype.tf_to_float(tf.zeros([x_shp[0], 1, hidden_size])),
+                "k": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
+                # for transformer
+                "v": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
             }
             for l in range(params.num_decoder_layer)
         },
-        "mask": mask
+        "mask": mask,
+        "to_lang": to_lang,
     }
 
 
-def average_attention_strategy(strategy, x, mask, state, layer, params):
-    strategy = strategy.lower()
-
-    is_training = ('decoder' not in state)
-
-    if strategy == "aan":
-        if is_training:
-            if params.aan_mask:
-                aan_bias = func.attention_bias(mask, "aan")
-                x_fwd = tf.matmul(aan_bias, x)
-            else:
-                aan_bias = tf.cumsum(mask, axis=1)
-                aan_bias = tf.where(tf.less_equal(aan_bias, 0.),
-                                    tf.ones_like(aan_bias), aan_bias)
-                aan_bias = tf.expand_dims(dtype.tf_to_float(aan_bias), 2)
-
-                x_fwd = tf.cumsum(x, axis=1) / aan_bias
-        else:
-            cache = state['decoder']['state']['layer_{}'.format(layer)]
-            x_fwd = (x + cache['aan']) / dtype.tf_to_float(state['time'] + 1)
-            cache['aan'] = x + cache['aan']
-
-        return x_fwd
-
-    else:
-        raise NotImplementedError("Not supported: {}".format(strategy))
-
-
-def decoder(target, state, params):
+def decoder(target, to_lang, state, params):
     mask = dtype.tf_to_float(tf.cast(target, tf.bool))
     hidden_size = params.hidden_size
     initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
@@ -162,54 +150,71 @@ def decoder(target, state, params):
             else:
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
-                with tf.variable_scope("average_attention"):
-                    x_fwds = []
-                    for strategy in params.strategies:
-                        with tf.variable_scope(strategy):
-                            x_fwd = average_attention_strategy(
-                                strategy, x, mask, state, layer, params)
-                            x_fwds.append(x_fwd)
-                    x_fwd = tf.add_n(x_fwds) / len(x_fwds)
-
-                    # FFN activation
-                    if params.use_ffn:
-                        y = func.ffn_layer(
-                            x_fwd,
-                            params.filter_size,
+                # by default, we employ merged attention, for faster training and generation
+                if params.enable_fuse:
+                    with tf.variable_scope("fuse_attention"):
+                        y = func.dot_attention(
+                            x,
+                            state['encodes'],
+                            func.attention_bias(state['mask'], "masking"),
                             hidden_size,
-                            dropout=params.relu_dropout,
+                            num_heads=params.num_heads,
+                            dropout=params.attention_dropout,
+                            fuse_mask=func.attention_bias(mask, "aan") if is_training else state['time'],
+                            cache=None if is_training else
+                            state['decoder']['state']['layer_{}'.format(layer)]
                         )
-                    else:
-                        y = x_fwd
+                        if not is_training:
+                            # mk, mv, aan
+                            state['decoder']['state']['layer_{}'.format(layer)]\
+                                .update(y['cache'])
 
-                    # Gating layer
-                    z = func.linear(tf.concat([x, y], axis=-1),
-                                    hidden_size * 2, scope="z_project")
-                    i, f = tf.split(z, 2, axis=-1)
-                    y = tf.sigmoid(i) * x + tf.sigmoid(f) * y
+                        y = y['output']
+                        x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                        # language-aware layer normalization
+                        x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
+                else:
+                    with tf.variable_scope("self_attention"):
+                        y = func.dot_attention(
+                            x,
+                            None,
+                            func.attention_bias(tf.shape(mask)[1], "causal"),
+                            hidden_size,
+                            num_heads=params.num_heads,
+                            dropout=params.attention_dropout,
+                            cache=None if is_training else
+                            state['decoder']['state']['layer_{}'.format(layer)]
+                        )
+                        if not is_training:
+                            # k, v
+                            state['decoder']['state']['layer_{}'.format(layer)] \
+                                .update(y['cache'])
 
-                    x = func.residual_fn(x, y, dropout=params.residual_dropout)
-                    x = func.layer_norm(x)
+                        y = y['output']
+                        x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                        # language-aware layer normalization
+                        x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
 
-                with tf.variable_scope("cross_attention"):
-                    y = func.dot_attention(
-                        x,
-                        state['encodes'],
-                        func.attention_bias(state['mask'], "masking"),
-                        hidden_size,
-                        num_heads=params.num_heads,
-                        dropout=params.attention_dropout,
-                        cache=None if is_training else
-                        state['decoder']['state']['layer_{}'.format(layer)]
-                    )
-                    if not is_training:
-                        # mk, mv
-                        state['decoder']['state']['layer_{}'.format(layer)]\
-                            .update(y['cache'])
+                    with tf.variable_scope("cross_attention"):
+                        y = func.dot_attention(
+                            x,
+                            state['encodes'],
+                            func.attention_bias(state['mask'], "masking"),
+                            hidden_size,
+                            num_heads=params.num_heads,
+                            dropout=params.attention_dropout,
+                            cache=None if is_training else
+                            state['decoder']['state']['layer_{}'.format(layer)]
+                        )
+                        if not is_training:
+                            # mk, mv
+                            state['decoder']['state']['layer_{}'.format(layer)] \
+                                .update(y['cache'])
 
-                    y = y['output']
-                    x = func.residual_fn(x, y, dropout=params.residual_dropout)
-                    x = func.layer_norm(x)
+                        y = y['output']
+                        x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                        # language-aware layer normalization
+                        x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
 
                 with tf.variable_scope("feed_forward"):
                     y = func.ffn_layer(
@@ -220,7 +225,8 @@ def decoder(target, state, params):
                     )
 
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
-                    x = func.layer_norm(x)
+                    # language-aware layer normalization
+                    x = func.layer_norm(x, lang=to_lang, lang_size=params.to_lang_vocab.size())
     feature = x
     if 'dev_decode' in state:
         feature = x[:, -1, :]
@@ -266,8 +272,8 @@ def train_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
-        loss, logits, state, _ = decoder(features['target'], state, params)
+        state = encoder(features['source'], features['to_lang'], params)
+        loss, logits, state, _ = decoder(features['target'], features['to_lang'], state, params)
 
         return {
             "loss": loss
@@ -283,8 +289,8 @@ def score_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
-        _, _, _, scores = decoder(features['target'], state, params)
+        state = encoder(features['source'], features['to_lang'], params)
+        _, _, _, scores = decoder(features['target'], features['to_lang'], state, params)
 
         return {
             "score": scores
@@ -295,18 +301,18 @@ def infer_fn(params):
     params = copy.copy(params)
     params = util.closing_dropout(params)
 
-    def encoding_fn(source):
+    def encoding_fn(source, to_lang):
         with tf.variable_scope(params.scope_name or "model",
                                reuse=tf.AUTO_REUSE,
                                dtype=tf.as_dtype(dtype.floatx()),
                                custom_getter=dtype.float32_variable_storage_getter):
-            state = encoder(source, params)
+            state = encoder(source, to_lang, params)
             state["decoder"] = {
                 "state": state["decoder_initializer"]
             }
             return state
 
-    def decoding_fn(target, state, time):
+    def decoding_fn(target, to_lang, state, time):
         with tf.variable_scope(params.scope_name or "model",
                                reuse=tf.AUTO_REUSE,
                                dtype=tf.as_dtype(dtype.floatx()),
@@ -314,12 +320,12 @@ def infer_fn(params):
             if params.search_mode == "cache":
                 state['time'] = time
                 step_loss, step_logits, step_state, _ = decoder(
-                    target, state, params)
+                    target, to_lang, state, params)
                 del state['time']
             else:
-                estate = encoder(state, params)
+                estate = encoder(state, to_lang, params)
                 estate['dev_decode'] = True
-                _, step_logits, _, _ = decoder(target, estate, params)
+                _, step_logits, _, _ = decoder(target, to_lang, estate, params)
                 step_state = state
 
             return step_logits, step_state
@@ -328,4 +334,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("transformer_aan", train_fn, score_fn, infer_fn)
+model.model_register("transformer_multilingual", train_fn, score_fn, infer_fn)
