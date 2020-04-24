@@ -94,7 +94,7 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     dropout=0.1,label_smooth=0.1,\
     max_len=80,batch_size=80,eval_batch_size=240,\
     token_size=3000,batch_or_token='token',\
-    model_name="rnnsearch",buffer_size=3200,\
+    model_name="rnnsearch",scope_name="rnnsearch",buffer_size=3200,\
     clip_grad_norm=5.0,\
     lrate=5e-4,\
     epoches=10,\
@@ -138,7 +138,7 @@ Below is a rough procedure for WMT14 En-De translation tasks.
     dropout=0.1,label_smooth=0.1,\
     max_len=80,batch_size=80,eval_batch_size=240,\
     token_size=3000,batch_or_token='token',\
-    model_name="rnnsearch",buffer_size=3200,\
+    model_name="rnnsearch",scope_name="rnnsearch",buffer_size=3200,\
     clip_grad_norm=5.0,\
     lrate=5e-4,\
     epoches=10,\
@@ -199,6 +199,7 @@ Below is a rough procedure for WMT14 En-De translation tasks.
         token_size=3000,
         batch_or_token='token',
         model_name="rnnsearch",
+        scope_name="rnnsearch",
         buffer_size=3200,
         clip_grad_norm=5.0,
         lrate=5e-4,
