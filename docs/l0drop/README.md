@@ -1,9 +1,6 @@
-# On Sparsifying Encoder Outputs in Sequence-to-Sequence Models
+## On Sparsifying Encoder Outputs in Sequence-to-Sequence Models
 
 [paper](#)
-
-
-## Motivation
 
 Standard encoder-decoder models for sequence-to-sequence learning feed all encoder outputs to the decoder 
 for sequence generation. By contrast, we propose L0Drop which forces model to route information 
@@ -23,13 +20,24 @@ of generation performance as shown below:
 L0Drop shortens the encoding sequence fed to the decoder, resulting in 1.65x speedup on
 document summarization tasks.
 
+### Examples
 
-## Code
+Here, we show some examples learned by L0Drop on machine translation tasks (highlighted source words are dropped after encoding):
+
+| Task           | Sample                                                                                                                                                                                                                                                                                                                                                                                            |
+|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|    WMT18 Zh-En | Source `这` 一年 `来` `，` 中国 电@@ 商 出 `了` `一份` 怎样 `的` 成绩@@ 单 ？ <br/> Reference: what sort of report card did China &apos;s e @-@ commerce industry receive this year ? <br/> Translation: what kind of report card was produced by Chinese telec@@ om dealers during the year ?                                                                                                                |
+|                | Source: 中国 `在` 地区 合作 `中` `发挥` `的` 作用 一贯 `是` 积极 正面 `的` `，` `受到` 地区 国家 高度 认可 `。` <br/> Reference: China has always played an active and positive role in regional cooperation , which is well recognized by regional countries . <br/> Translation: China &apos;s role in regional cooperation has always been positive and highly recognized by the countries of the region . |
+|    WMT14 En-De | Source: `The` cause `of` `the` b@@ `last` `was` not known `,` he said `.` <br/> Reference: Die Ursache der Explo@@ sion sei nicht bekannt , erklärte er . <br/> Translation: Die Ursache der Explo@@ sion war nicht bekannt , sagte er .                                                                                                                                                                      |
+|                | Source: `The` night `was` long , `the` music loud and `the` atmosphere good `,` but `at` some `point` everyone has `to` go home `.` <br/> Reference: Die Nacht war lang , die Musik laut und die Stimmung gut , aber irgendwann geht es nach Hause . <br/> Translation: Die Nacht war lang , die Musik laut und die Atmosphäre gut , aber irgendwann muss jeder nach Hause gehen .                            |
+
+
+### Code
 
 We implement the model in [transformer_l0drop](../../models/transformer_l0drop.py) 
 and [l0norm](../../modules/l0norm.py)
 
-## Model Training
+### Training
 
 It's possible to train Transformer with L0Drop from scratch by setting proper schedulers for `\lambda`, 
 a hyperparameter loosely controling the sparsity rate of L0Drop. Unfortunately, the optimal scheduler is
@@ -102,17 +110,7 @@ output_dir="train"
 ```
 where `l0_norm_reg_scalar` is the `\lambda`, and `0.2` is a nice hyperparameter in our experiments.
 
-## Evaluation
+### Evaluation
 
 The evaluation follows the same procedure as the baseline Transformer.
 
-## Examples
-
-Here, we show some examples learned by L0Drop on machine translation tasks (highlighted source words are dropped after encoding):
-
-| Task           | Sample                                                                                                                                                                                                                                                                                                                                                                                            |
-|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|    WMT18 Zh-En | Source `这` 一年 `来` `，` 中国 电@@ 商 出 `了` `一份` 怎样 `的` 成绩@@ 单 ？ <br/> Reference: what sort of report card did China &apos;s e @-@ commerce industry receive this year ? <br/> Translation: what kind of report card was produced by Chinese telec@@ om dealers during the year ?                                                                                                                |
-|                | Source: 中国 `在` 地区 合作 `中` `发挥` `的` 作用 一贯 `是` 积极 正面 `的` `，` `受到` 地区 国家 高度 认可 `。` <br/> Reference: China has always played an active and positive role in regional cooperation , which is well recognized by regional countries . <br/> Translation: China &apos;s role in regional cooperation has always been positive and highly recognized by the countries of the region . |
-|    WMT14 En-De | Source: `The` cause `of` `the` b@@ `last` `was` not known `,` he said `.` <br/> Reference: Die Ursache der Explo@@ sion sei nicht bekannt , erklärte er . <br/> Translation: Die Ursache der Explo@@ sion war nicht bekannt , sagte er .                                                                                                                                                                      |
-|                | Source: `The` night `was` long , `the` music loud and `the` atmosphere good `,` but `at` some `point` everyone has `to` go home `.` <br/> Reference: Die Nacht war lang , die Musik laut und die Stimmung gut , aber irgendwann geht es nach Hause . <br/> Translation: Die Nacht war lang , die Musik laut und die Atmosphäre gut , aber irgendwann muss jeder nach Hause gehen .                            |
