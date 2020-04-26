@@ -311,8 +311,9 @@ fi
 # after extraction, we get "data.src, data.tgt, data.lang"
 # learn and apply subword module
 if ! check_step "${step2}" ${ckpt_file}; then
+    # we learn bpe model only with source data, as source and target share the same data
     python3 ${bpebin_path}/spm_train.py \
-        --input=${many_to_many_path}/corpus.train.src,${many_to_many_path}/corpus.train.tgt \
+        --input=${many_to_many_path}/corpus.train.src \
         --model_prefix=${many_to_many_path}/sentencepiece.bpe \
         --vocab_size=${bpesize} \
         --character_coverage=1.0 \
