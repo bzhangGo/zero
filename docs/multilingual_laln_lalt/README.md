@@ -52,7 +52,7 @@ language-aware modeling => models/transformer_multilingual
 
 ### Data preprocessing
 
-We provide a simple script to download and preprocess the source code
+We provide a simple script to download and preprocess the OPUS-100
 * Step 1: download zero code `git clone --branch multilingual_laln_lalt https://github.com/bzhangGo/zero.git`
     - set code path `zero_path=path-to-the-zero-code/zero`, such as ```zero_path=`pwd`/zero```
 * Step 2: download opus dataset `bash $zero_path/scripts/data/download_opus100.sh $zero_path opus-100`
@@ -70,7 +70,7 @@ We provide a simple script to download and preprocess the source code
 
 ### Training
 
-We provide an example to show hwo to train the model, as given in 
+We provide an example to show how to train the model, as given in 
 [exmple_training.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_training.sh).
 
 * remember to set the data_path in example_training.py to `$data_path/one-to-many` for one-to-many translation 
