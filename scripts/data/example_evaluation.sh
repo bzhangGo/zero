@@ -63,9 +63,9 @@ python3 ${zero_path}/scripts/spm_decode.py \
     --input_format piece > ${out}.trans.post.txt
 
 scarebleu_options=""
-if [[ ${yy} == "zh" ]]; then
-    scarebleu_options+="--tokenize zh"
-fi
+#if [[ ${yy} == "zh" ]]; then
+#    scarebleu_options+="--tokenize zh"
+#fi
 
 sacrebleu ${ref} ${scarebleu_options} < ${out}.trans.post.txt > ${out}.trans.post.txt.sacrebleu
 
