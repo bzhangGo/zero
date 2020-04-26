@@ -16,10 +16,13 @@ bpesize=64000
 data_path=$1
 # zero codebase path, zero/
 zero_path=$2
+# whether reuse the sentence piece model for one-to-many and many-to-many
+# value: yes/no
+bpe_reuse=$3
 # setting output directory is permitted
 output_path='data'
-if [[ "$#" -gt 2 ]]; then
-    output_path=$3
+if [[ "$#" -gt 3 ]]; then
+    output_path=$4
 fi
 
 bpebin_path=${zero_path}/scripts/
@@ -289,7 +292,6 @@ if [[ ! -f ${ckpt_file} ]]; then
     touch ${ckpt_file}
 fi
 
-
 if ! check_step "${step1}" ${ckpt_file}; then
     if [[ -f ${many_to_many_path}/corpus.train.tgt ]]; then
         rm ${many_to_many_path}/corpus.train.*
@@ -312,12 +314,16 @@ fi
 # learn and apply subword module
 if ! check_step "${step2}" ${ckpt_file}; then
     # we learn bpe model only with source data, as source and target share the same data
-    python3 ${bpebin_path}/spm_train.py \
-        --input=${many_to_many_path}/corpus.train.src \
-        --model_prefix=${many_to_many_path}/sentencepiece.bpe \
-        --vocab_size=${bpesize} \
-        --character_coverage=1.0 \
-        --model_type=bpe
+    if [[ ${bpe_reuse} == "no" ]]; then
+        python3 ${bpebin_path}/spm_train.py \
+            --input=${many_to_many_path}/corpus.train.src \
+            --model_prefix=${many_to_many_path}/sentencepiece.bpe \
+            --vocab_size=${bpesize} \
+            --character_coverage=1.0 \
+            --model_type=bpe
+    else
+        ln -s $(realpath ${one_to_many_path}/sentencepiece.bpe.*) ${many_to_many_path}/
+    fi
     add_step "${step2}" ${ckpt_file}
 fi
 
