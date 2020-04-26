@@ -59,7 +59,7 @@ We provide a simple script to download and preprocess the OPUS-100
     - Notice, speed is slow!
     - set data path `opus_path=path-to-opus-100/opus-100`, such as ```opus_path=`pwd`/opus-100```
 * Step 3: preprocess and prepare for one-to-many translation and many-to-many translation
-`bash $zero_path/scripts/data/prepare_multilingual_translation.sh $opus_path $zero_path preprocessed_data`
+`bash $zero_path/scripts/data/prepare_multilingual_translation.sh $opus_path $zero_path yes preprocessed_data`
     - Requirement
         - python3, with sentencepiece installed
         - python2
