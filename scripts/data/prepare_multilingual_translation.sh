@@ -268,8 +268,8 @@ function handle_zeroshot {
 }
 
 # for zero-shot test set
+zero_shot_path=${data_path}/zero-shot/
 if ! check_step "${step6}" ${ckpt_file}; then
-    zero_shot_path=${data_path}/zero-shot/
     for z1 in ${zero_shot_langs}; do
         for z2 in ${zero_shot_langs}; do
             if [[ $z1 == $z2 ]]; then
