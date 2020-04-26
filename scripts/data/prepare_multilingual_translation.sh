@@ -293,12 +293,10 @@ if [[ ! -f ${ckpt_file} ]]; then
 fi
 
 if ! check_step "${step1}" ${ckpt_file}; then
-    if [[ -f ${many_to_many_path}/corpus.train.tgt ]]; then
-        rm ${many_to_many_path}/corpus.train.*
-        rm ${many_to_many_path}/corpus.dev.*
-    fi
-
     for dataset in "train" "dev"; do
+        if [[ -f ${many_to_many_path}/corpus.${dataset}.tgt ]]; then
+            rm ${many_to_many_path}/corpus.${dataset}.*
+        fi
         cat ${one_to_many_path}/corpus.${dataset}.en >> ${many_to_many_path}/corpus.${dataset}.src
         cat ${one_to_many_path}/corpus.${dataset}.xx >> ${many_to_many_path}/corpus.${dataset}.tgt
         cat ${one_to_many_path}/corpus.${dataset}.xx >> ${many_to_many_path}/corpus.${dataset}.src
@@ -313,8 +311,8 @@ fi
 # after extraction, we get "data.src, data.tgt, data.lang"
 # learn and apply subword module
 if ! check_step "${step2}" ${ckpt_file}; then
-    # we learn bpe model only with source data, as source and target share the same data
     if [[ ${bpe_reuse} == "no" ]]; then
+        # we learn bpe model only with source data, as source and target share the same data
         python3 ${bpebin_path}/spm_train.py \
             --input=${many_to_many_path}/corpus.train.src \
             --model_prefix=${many_to_many_path}/sentencepiece.bpe \
@@ -328,13 +326,25 @@ if ! check_step "${step2}" ${ckpt_file}; then
 fi
 
 if ! check_step "${step3}" ${ckpt_file}; then
-    for dataset in "train" "dev"; do
-        python3 ${bpebin_path}/spm_encode.py \
-            --model ${many_to_many_path}/sentencepiece.bpe.model \
-            --output_format=piece \
-            --inputs ${many_to_many_path}/corpus.${dataset}.src ${many_to_many_path}/corpus.${dataset}.tgt \
-            --outputs ${many_to_many_path}/corpus.${dataset}.bpe.src ${many_to_many_path}/corpus.${dataset}.bpe.tgt
-    done
+    if [[ ${bpe_reuse} == "no" ]]; then
+        for dataset in "train" "dev"; do
+            python3 ${bpebin_path}/spm_encode.py \
+                --model ${many_to_many_path}/sentencepiece.bpe.model \
+                --output_format=piece \
+                --inputs ${many_to_many_path}/corpus.${dataset}.src ${many_to_many_path}/corpus.${dataset}.tgt \
+                --outputs ${many_to_many_path}/corpus.${dataset}.bpe.src ${many_to_many_path}/corpus.${dataset}.bpe.tgt
+        done
+    else
+        for dataset in "train" "dev"; do
+            if [[ -f ${many_to_many_path}/corpus.${dataset}.bpe.tgt ]]; then
+                rm ${many_to_many_path}/corpus.${dataset}.bpe.*
+            fi
+            cat ${one_to_many_path}/corpus.${dataset}.bpe.en >> ${many_to_many_path}/corpus.${dataset}.bpe.src
+            cat ${one_to_many_path}/corpus.${dataset}.bpe.xx >> ${many_to_many_path}/corpus.${dataset}.bpe.tgt
+            cat ${one_to_many_path}/corpus.${dataset}.bpe.xx >> ${many_to_many_path}/corpus.${dataset}.bpe.src
+            cat ${one_to_many_path}/corpus.${dataset}.bpe.en >> ${many_to_many_path}/corpus.${dataset}.bpe.tgt
+        done
+    fi
     add_step "${step3}" ${ckpt_file}
 fi
 
