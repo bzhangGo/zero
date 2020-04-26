@@ -7,8 +7,13 @@ Our empirical observation suggests that simply stacking more Transformer layers 
 Rather than resorting to the pre-norm structure which shifts the layer normalization before modeling blocks,
 we analyze the reason why a vanilla deep Transformer suffers from poor convergence.
 
-Our evidence shows that it's because of *gradient vanishing* caused by the interaction between residual connection
-and layer normalization. We solve this problem by proposing depth-scaled initialization (DS-Init), which decreases 
+<img src="grad.png"  width=500 />
+
+Our evidence shows that it's because of *gradient vanishing* (shown above) caused by the interaction between residual connection
+and layer normalization. **In short, the residual connection increases the variance of its output, which decreases the gradient
+backpropagated from layer normalization. (empirically)**
+
+We solve this problem by proposing depth-scaled initialization (DS-Init), which decreases 
 parameter variance at the initialization stage. DS-Init reduces output variance of residual connections so as to
 ease gradient back-propagation through normalization layers. In practice, DS-Init often produces slightly better
 translation quality than the pre-norm structure.
@@ -71,9 +76,27 @@ More details can be found [here](../usage/README.md).
 
 Pretrained models can be found [here](http://data.statmt.org/bzhang/emnlp19_deep_transformer/).
 
+### Performance
+
+| Task          | Model                               | BLEU  |
+|---------------|-------------------------------------|-------|
+| WMT14 En-Fr   | Base Transformer + 6 Layers         | 39.09 |
+|               | Base Transformer + Ours + 12 Layers | 40.58 |
+| IWSLT14 De-En | Base Transformer + 6 Layers         | 34.41 |
+|               | Base Transformer + Ours + 12 Layers | 35.63 |
+| WMT18 En-Fr   | Base Transformer + 6 Layers         | 15.5  |
+|               | Base Transformer + Ours + 12 Layers | 15.8  |
+| WMT18 Zh-En   | Base Transformer + 6 Layers         | 21.1  |
+|               | Base Transformer + Ours + 12 Layers | 22.3  |
+| WMT14 En-De   | Base Transformer + 6 Layers         | 27.59 |
+|               | Base Transformer + Ours + 12 Layers | 28.55 |
+|               | Big Transformer + 6 Layers          | 29.07 |
+|               | Big Transformer + Ours + 12 Layers  | 29.47 |
+
 ### Citation
 
 Please consider cite our paper as follows:
+>Biao Zhang; Ivan Titov; Rico Sennrich (2019). Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP). Hong Kong, China, pp. 898-909. 
 ```
 @inproceedings{zhang-etal-2019-improving-deep,
     title = "Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention",

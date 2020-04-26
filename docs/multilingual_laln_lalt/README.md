@@ -41,89 +41,61 @@ often suffer from `off-target translation` [1,2].
    
 ### Code
 
-We implement the model in [transformer_l0drop](../../models/transformer_l0drop.py) 
-and [l0norm](../../modules/l0norm.py)
+We implement models in our paper in a new branch of zero: 
+[multilingual_laln_lalt](https://github.com/bzhangGo/zero/tree/multilingual_laln_lalt).
+
+Please go to the new branch for code viewing:
+```
+random online backtranslation => main.py
+language-aware modeling => models/transformer_multilingual
+```
+
+### Data preprocessing
+
+We provide a simple script to download and preprocess the source code
+* Step 1: download zero code `git clone --branch multilingual_laln_lalt https://github.com/bzhangGo/zero.git`
+    - set code path `zero_path=path-to-the-zero-code/zero`, such as ```zero_path=`pwd`/zero```
+* Step 2: download opus dataset `bash $zero_path/scripts/data/download_opus100.sh $zero_path opus-100`
+    - Notice, speed is slow!
+    - set data path `opus_path=path-to-opus-100/opus-100`, such as ```opus_path=`pwd`/opus-100```
+* Step 3: preprocess and prepare for one-to-many translation and many-to-many translation
+`bash $zero_path/scripts/data/prepare_multilingual_translation.sh $opus_path $zero_path preprocessed_data`
+    - Requirement
+        - python3, with sentencepiece installed
+        - python2
+    - !! Very very slow! (mainly due to subword processing part)
+    - set preprocessed data path `data_path=path-to-preprocessed-opus-100/preprocessed_data`, 
+    such as ```data_path=`pwd`/preprocessed_data```
+    - Two corpus are automatically generated: `$data_path/one-to-many` and `$data_path/many-to-many`
 
 ### Training
 
-It's possible to train Transformer with L0Drop from scratch by setting proper schedulers for `\lambda`, 
-a hyperparameter loosely controling the sparsity rate of L0Drop. Unfortunately, the optimal scheduler is
-data&task-dependent.
+We provide an example to show hwo to train the model, as given in 
+[exmple_training.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_training.sh).
 
-We suggest first pre-train a normal Transformer model, and then finetune the Transfomer+L0Drop. This could
-save a lot of efforts.
+* remember to set the data_path in example_training.py to `$data_path/one-to-many` for one-to-many translation 
+or `$data_path/many-to-many` for many-to-many translation.
 
-* Step 1. train a normal Transformer model as described [here](../../docs/usage/README.md). Below is 
-an example on WMT14 En-De for reference:
-```
-data_dir=the preprocessed data diretory
-zero=the path of this code base
-python $zero/run.py --mode train --parameters=hidden_size=512,embed_size=512,filter_size=2048,\
-dropout=0.1,label_smooth=0.1,attention_dropout=0.1,\
-max_len=256,batch_size=80,eval_batch_size=32,\
-token_size=6250,batch_or_token='token',\
-initializer="uniform_unit_scaling",initializer_gain=1.,\
-model_name="transformer",scope_name="transformer",buffer_size=60000,\
-clip_grad_norm=0.0,\
-num_heads=8,\
-lrate=1.0,\
-process_num=3,\
-num_encoder_layer=6,\
-num_decoder_layer=6,\
-warmup_steps=4000,\
-lrate_strategy="noam",\
-epoches=5000,\
-update_cycle=4,\
-gpus=[0],\
-disp_freq=1,\
-eval_freq=5000,\
-sample_freq=1000,\
-checkpoints=5,\
-max_training_steps=300000,\
-beta1=0.9,\
-beta2=0.98,\
-epsilon=1e-8,\
-random_seed=1234,\
-src_vocab_file="$data_dir/vocab.zero.en",\
-tgt_vocab_file="$data_dir/vocab.zero.de",\
-src_train_file="$data_dir/train.32k.en.shuf",\
-tgt_train_file="$data_dir/train.32k.de.shuf",\
-src_dev_file="$data_dir/dev.32k.en",\
-tgt_dev_file="$data_dir/dev.32k.de",\
-src_test_file="$data_dir/newstest2014.32k.en",\
-tgt_test_file="$data_dir/newstest2014.de",\
-output_dir="train"
-```
+### *Finetuning*
 
-* Step 2. finetune L0Drop using the following command:
-```
-data_dir=the preprocessed data directory
-zero=the path of this code base
-python $zero/run.py --mode train --parameters=\
-l0_norm_reg_scalar=0.2,\
-l0_norm_warm_up=False,\
-model_name="transformer_l0drop",scope_name="transformer",\
-pretrained_model="path-to-pretrained-transformer",\
-max_training_steps=320000,\
-src_vocab_file="$data_dir/vocab.zero.en",\
-tgt_vocab_file="$data_dir/vocab.zero.de",\
-src_train_file="$data_dir/train.32k.en.shuf",\
-tgt_train_file="$data_dir/train.32k.de.shuf",\
-src_dev_file="$data_dir/dev.32k.en",\
-tgt_dev_file="$data_dir/dev.32k.de",\
-src_test_file="$data_dir/newstest2014.32k.en",\
-tgt_test_file="$data_dir/newstest2014.de",\
-output_dir="train"
-```
-where `l0_norm_reg_scalar` is the `\lambda`, and `0.2` is a nice hyperparameter in our experiments.
+For many-to-many translation, we propose `random online backtranslation` to enable thousands of zero-shot translation
+directions. We show how to perform finetuning in 
+[example_finetuning.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_finetuning.sh).
 
 ### Evaluation
 
-The evaluation follows the same procedure as the baseline Transformer.
+Multilingual evaluation in OPUS-100 include `xx-en`, `en-xx` (only for one-to-many translation), and `xx-xx`.
+We show how to do evaluation in 
+[example_evaluation.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_evaluation.sh).
+
+We employ `sacrebleu` for all evaluation.
 
 ### Citation
 
 Please consider cite our paper as follows:
+>Biao Zhang; Philip Williams; Ivan Titov; Rico Sennrich (2020). 
+Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation. 
+In Proceedings of the 2020 Annual Conference of the Association for Computational Linguistics.
 ```
 @inproceedings{zhang2020,
 title = "Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation",
