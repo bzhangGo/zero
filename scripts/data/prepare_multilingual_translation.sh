@@ -260,10 +260,27 @@ function handle_zeroshot {
             --model ${model_path}/sentencepiece.bpe.model \
             --output_format=piece \
             --inputs ${src_test} \
-            --outputs ${out_dir}/opus.${src}
+            --outputs ${out_dir}/opus.${x}
 
-        paste -d " " ${out_dir}/opus.lang ${out_dir}/opus.${src} > ${out_dir}/opus.bpe.${src}
-        rm ${out_dir}/opus.lang ${out_dir}/opus.${src}
+        paste -d " " ${out_dir}/opus.lang ${out_dir}/opus.${x} > ${out_dir}/opus.bpe.${x}
+        rm ${out_dir}/opus.lang ${out_dir}/opus.${x}
+
+        # handling reverse
+        out_dir=${out_path}/${y}-${x}/
+        check_make_dir ${out_dir}
+
+        cp ${src_test} ${out_dir}/opus.${x}
+        cat ${src_test} | sed "s/^.*$/<2${x}>/g" >> ${out_dir}/opus.lang
+
+        # bpe processing
+        python3 ${bpebin_path}/spm_encode.py \
+            --model ${model_path}/sentencepiece.bpe.model \
+            --output_format=piece \
+            --inputs ${tgt_test} \
+            --outputs ${out_dir}/opus.${y}
+
+        paste -d " " ${out_dir}/opus.lang ${out_dir}/opus.${y} > ${out_dir}/opus.bpe.${y}
+        rm ${out_dir}/opus.lang ${out_dir}/opus.${y}
     fi
 }
 
