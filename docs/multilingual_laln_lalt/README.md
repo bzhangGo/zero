@@ -1,6 +1,6 @@
 ## Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation
 
-[paper](#)
+[paper](http://arxiv.org/abs/2004.11867)
 
 We study massively multilingual translation in this paper, 
 with a goal of improving zero-shot translation.
@@ -58,6 +58,9 @@ We provide a simple script to download and preprocess the OPUS-100
 * Step 2: download opus dataset `bash $zero_path/scripts/data/download_opus100.sh $zero_path opus-100`
     - Notice, speed is slow!
     - set data path `opus_path=path-to-opus-100/opus-100`, such as ```opus_path=`pwd`/opus-100```
+  
+  Or instead, using wget: `wget -r -np -nH -R "index.html*" -e robots=off http://data.statmt.org/opus-100-corpus/v1.0/`
+  and set data path ```opus_path=`pwd`/opus-100-corpus/v1.0```
 * Step 3: preprocess and prepare for one-to-many translation and many-to-many translation
 `bash $zero_path/scripts/data/prepare_multilingual_translation.sh $opus_path $zero_path yes preprocessed_data`
     - Requirement
@@ -71,7 +74,7 @@ We provide a simple script to download and preprocess the OPUS-100
 ### Training
 
 We provide an example to show how to train the model, as given in 
-[exmple_training.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_training.sh).
+[example_training.sh](https://github.com/bzhangGo/zero/blob/multilingual_laln_lalt/scripts/data/example_training.sh).
 
 * remember to set the data_path in example_training.py to `$data_path/one-to-many` for one-to-many translation 
 or `$data_path/many-to-many` for many-to-many translation.
