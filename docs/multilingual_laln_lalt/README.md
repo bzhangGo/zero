@@ -93,6 +93,11 @@ We show how to do evaluation in
 
 We employ `sacrebleu` for all evaluation.
 
+### More Results
+
+We format our paper by only reporting average BLEU scores. For those interested in concrete results for each 
+language pair, we provide more [detailed results](many-to-many.xlsx) for many-to-many translation.
+
 ### Citation
 
 Please consider cite our paper as follows:
