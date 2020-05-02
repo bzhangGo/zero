@@ -373,7 +373,7 @@ def attention_bias(inputs, mode, inf=None, name=None):
     """ A bias tensor used in attention mechanism"""
 
     if inf is None:
-        inf = - dtype.inf()
+        inf = dtype.inf()
 
     with tf.name_scope(name, default_name="attention_bias", values=[inputs]):
         if mode == "causal":
@@ -381,11 +381,11 @@ def attention_bias(inputs, mode, inf=None, name=None):
             lower_triangle = tf.matrix_band_part(
                 tf.ones([length, length]), -1, 0
             )
-            ret = dtype.tf_to_float(inf * (1.0 - lower_triangle))
+            ret = dtype.tf_to_float(- inf * (1.0 - lower_triangle))
             return tf.reshape(ret, [1, 1, length, length])
         elif mode == "masking":
             mask = inputs
-            ret = (1.0 - mask) * inf
+            ret = (1.0 - mask) * - inf
             return tf.expand_dims(tf.expand_dims(ret, 1), 1)
         elif mode == "aan":
             length = tf.shape(inputs)[1]
@@ -393,7 +393,7 @@ def attention_bias(inputs, mode, inf=None, name=None):
             cum_factor = tf.expand_dims(tf.cumsum(diagonal, axis=0), 0)
             mask = tf.expand_dims(inputs, 1) * tf.expand_dims(inputs, 2)
             mask *= dtype.tf_to_float(cum_factor)
-            weight = tf.nn.softmax(mask + (1.0 - mask) * inf)
+            weight = tf.nn.softmax(mask + (1.0 - mask) * - inf)
             weight *= mask
             return weight
         else:
