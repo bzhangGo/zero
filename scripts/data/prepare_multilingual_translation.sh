@@ -24,6 +24,11 @@ output_path='data'
 if [[ "$#" -gt 3 ]]; then
     output_path=$4
 fi
+# setting n for devset preparation
+topn=100000000
+if [[ "$#" -gt 4 ]]; then
+    topn=$5
+fi
 
 bpebin_path=${zero_path}/scripts/
 
@@ -90,9 +95,9 @@ function handle_supervise {
         cat ${xx_train} | sed "s/^.*$/<2${tgt}>/g" >> ${out_path}/${prefix}.train.lang
     fi
     if [[ -f ${en_dev} ]]; then
-        cat ${en_dev} >> ${out_path}/${prefix}.dev.en
-        cat ${xx_dev} >> ${out_path}/${prefix}.dev.xx
-        cat ${xx_dev} | sed "s/^.*$/<2${tgt}>/g" >> ${out_path}/${prefix}.dev.lang
+        cat ${en_dev} | head -n ${topn} | >> ${out_path}/${prefix}.dev.en
+        cat ${xx_dev} | head -n ${topn} | >> ${out_path}/${prefix}.dev.xx
+        cat ${xx_dev} | head -n ${topn} | sed "s/^.*$/<2${tgt}>/g" >> ${out_path}/${prefix}.dev.lang
     fi
 }
 
@@ -417,11 +422,11 @@ echo 'summary:'
 echo '1. one-to-many translation'
 echo 'path: ' ${one_to_many_path}
 echo 'train: ' ${one_to_many_path}/corpus.train.cmb.bpe.src.shuf ${one_to_many_path}/corpus.train.cmb.bpe.tgt.shuf
-echo 'dev: ' ${one_to_many_path}/corpus.dev.bpe.src ${one_to_many_path}/corpus.dev.bpe.tgt
+echo 'dev: ' ${one_to_many_path}/corpus.dev.cmb.bpe.src ${one_to_many_path}/corpus.dev.cmb.bpe.tgt
 echo 'test: ' ${one_to_many_path}/test/supervise ${one_to_many_path}/test/zero-shot
 
 echo '2. many-to-many translation'
 echo 'path: ' ${many_to_many_path}
 echo 'train: ' ${many_to_many_path}/corpus.train.cmb.bpe.src.shuf ${many_to_many_path}/corpus.train.cmb.bpe.tgt.shuf
-echo 'dev: ' ${many_to_many_path}/corpus.dev.bpe.src ${many_to_many_path}/corpus.dev.bpe.tgt
+echo 'dev: ' ${many_to_many_path}/corpus.dev.cmb.bpe.src ${many_to_many_path}/corpus.dev.cmb.bpe.tgt
 echo 'test: ' ${many_to_many_path}/test/supervise ${many_to_many_path}/test/zero-shot
