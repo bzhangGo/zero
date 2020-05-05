@@ -70,6 +70,12 @@ We provide a simple script to download and preprocess the OPUS-100
     - set preprocessed data path `data_path=path-to-preprocessed-opus-100/preprocessed_data`, 
     such as ```data_path=`pwd`/preprocessed_data```
     - Two corpus are automatically generated: `$data_path/one-to-many` and `$data_path/many-to-many`
+    - Note that we employ a `checkpoint` file to trace the preprocessing, which might not be robust enough for handling
+    all exceptional cases. In case you fail, consider to delete this file before reruning the script.
+    - By default, we should use all development dataset for model selection. However, OPUS-100 in multilingual setting
+    contains ~370k sentences for decoding, which could consume too many time. Instead, we offer another option to only
+    include top-`n` sentences in each devset as follows (`n` is set to 100):
+    `bash $zero_path/scripts/data/prepare_multilingual_translation.sh $opus_path $zero_path yes preprocessed_data 100`
 
 ### Training
 

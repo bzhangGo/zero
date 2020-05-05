@@ -93,7 +93,7 @@ output_dir="train"
 data_dir=the preprocessed data directory
 zero=the path of this code base
 python $zero/run.py --mode train --parameters=\
-l0_norm_reg_scalar=0.2,\
+l0_norm_reg_scalar=0.3,\
 l0_norm_warm_up=False,\
 model_name="transformer_l0drop",scope_name="transformer",\
 pretrained_model="path-to-pretrained-transformer",\
@@ -108,7 +108,7 @@ src_test_file="$data_dir/newstest2014.32k.en",\
 tgt_test_file="$data_dir/newstest2014.de",\
 output_dir="train"
 ```
-where `l0_norm_reg_scalar` is the `\lambda`, and `0.2` is a nice hyperparameter in our experiments.
+where `l0_norm_reg_scalar` is the `\lambda`, and `0.2 or 0.3` is a nice hyperparameter in our experiments.
 
 ### Evaluation
 
