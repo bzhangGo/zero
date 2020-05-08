@@ -38,7 +38,28 @@ often suffer from `off-target translation` [1,2].
     
   - Stronger capacity fails to solve the off-target translation issue.
   - Random online backtranslation works and scales very well to massively zero-shot translations.
-   
+  
+### Pretrained Multilingual Models (many-to-many)
+
+Training a multilingual model is time-consuming. We spent several weeks for one model with 4 P100 GPUs. We offer our
+pretrained models below to ease the study of massively multilingual translation:
+
+Model Description | Download
+---|---
+`Ours + 6 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L6.tar.gz)
+`Ours + 6 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L6-RoBT.tar.gz)
+`Ours + 12 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L12.tar.gz)
+`Ours + 12 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L12-RoBT.tar.gz)
+`Ours + 24 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L24.tar.gz)
+`Ours + 24 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L24-RoBT.tar.gz)
+
+- `Ours`: transformer + [merged attention](https://github.com/bzhangGo/zero/blob/master/docs/depth_scale_init_and_merged_attention/README.md) + LaLn + LaLT
+
+- some different preprocessing used in our experiments (**not suggested!**)
+    * We adopted "--character_coverage 0.9995 --input_sentence_size=10000000" for 
+    sentencepiece model training. This coverage rate results in messy code for some languages like Chinese.
+    * We cut the length of test sentence to 100 during evaluation to avoid memory issue.
+ 
 ### Code
 
 We implement models in our paper in a new branch of zero: 
