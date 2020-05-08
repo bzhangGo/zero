@@ -42,7 +42,7 @@ often suffer from `off-target translation` [1,2].
 ### Pretrained Multilingual Models (many-to-many)
 
 Training a multilingual model is time-consuming. We spent several weeks for one model with 4 P100 GPUs. We offer our
-pretrained models below to ease the study of massively multilingual translation:
+[pretrained models](http://data.statmt.org/bzhang/acl2020_multilingual/) below to ease the study of massively multilingual translation:
 
 Model Description | Download
 ---|---
@@ -55,10 +55,13 @@ Model Description | Download
 
 - `Ours`: transformer + [merged attention](https://github.com/bzhangGo/zero/blob/master/docs/depth_scale_init_and_merged_attention/README.md) + LaLn + LaLT
 
-- some different preprocessing used in our experiments (**not suggested!**)
+- Some different preprocessing used in our experiments (**not suggested!**)
     * We adopted "--character_coverage 0.9995 --input_sentence_size=10000000" for 
     sentencepiece model training. This coverage rate results in messy code for some languages like Chinese.
     * We cut the length of test sentence to 100 during evaluation to avoid memory issue.
+
+- The sentencepiece model and vocabulary used in our experiments are given [here](http://data.statmt.org/bzhang/acl2020_multilingual/submodels.tar.gz).
+We also provide an example [evaluation script](http://data.statmt.org/bzhang/acl2020_multilingual/example_evaluation.sh).
  
 ### Code
 
