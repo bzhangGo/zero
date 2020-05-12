@@ -27,7 +27,7 @@ with a clear higher BLEU score.
 
 To train a deep Transformer model for machine translation, scale your initialization for each layer as follows:
 
-<img src="grad.png"  width=240 />
+<img src="dsinit.png"  width=240 />
 
 where `\alpha` and `\gamma` are hyperparameters for the uniform distribution. `l` denotes the depth of the layer.
 
