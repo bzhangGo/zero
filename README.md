@@ -7,9 +7,9 @@ A neural machine translation system implemented by python2 + tensorflow.
 3. Gradient Aggregation 
 
 ## Papers
-* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop/README.md)
-* [Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation, ACL2020](docs/multilingual_laln_lalt/README.md)
-* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention/README.md)
+* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop)
+* [Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation, ACL2020](docs/multilingual_laln_lalt)
+* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention)
 
 ## Supported Models
 * RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
@@ -26,7 +26,7 @@ models.
 * tensorflow <= 1.13.2
 
 ## Usage
-[How to use this toolkit for machine translation?](docs/usage/README.md)
+[How to use this toolkit for machine translation?](docs/usage)
 
 ## TODO:
 1. organize the parameters and interpretations in config.

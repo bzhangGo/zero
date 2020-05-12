@@ -7,7 +7,7 @@ Our empirical observation suggests that simply stacking more Transformer layers 
 Rather than resorting to the pre-norm structure which shifts the layer normalization before modeling blocks,
 we analyze the reason why a vanilla deep Transformer suffers from poor convergence.
 
-<img src="grad.png"  width=500 />
+<img src="grad.png"  width=800 />
 
 Our evidence shows that it's because of *gradient vanishing* (shown above) caused by the interaction between residual connection
 and layer normalization. **In short, the residual connection increases the variance of its output, which decreases the gradient
@@ -23,75 +23,54 @@ attention network which combines a simplified average attention model and the en
 the target side. Merged attention model enables the deep Transformer matching the decoding speed of its baseline
 with a clear higher BLEU score.
 
+### Approach
+
+To train a deep Transformer model for machine translation, scale your initialization for each layer as follows:
+
+<img src="grad.png"  width=240 />
+
+where `\alpha` and `\gamma` are hyperparameters for the uniform distribution. `l` denotes the depth of the layer.
+
 
 ### Model Training
-train 12-layer Transformer model with the following settings:
+
+Train 12-layer Transformer model with the following settings:
 >The model class is: `transformer_fuse`, the merged attention is enabled by giving `fuse_mask` into `dot_attention` function.
 ```
-data_dir=the preprocessed data directory
 python run.py --mode train --parameters=hidden_size=512,embed_size=512,filter_size=2048,\
-dropout=0.1,label_smooth=0.1,attention_dropout=0.1,\
-max_len=256,eval_max_len=256,eval_batch_size=240,\
-token_size=6125,batch_or_token='token',\
 initializer="uniform_unit_scaling",initializer_gain=1.,\
-model_name="transformer_fuse",scope_name="transformer_fuse",buffer_size=600000,\
+model_name="transformer_fuse",scope_name="transformer_fuse",\
 deep_transformer_init=True,\
-clip_grad_norm=0.0,\
-num_heads=8,\
-lrate=1.0,\
-process_num=3,\
-estop_patience=100,\
 num_encoder_layer=12,\
 num_decoder_layer=12,\
-warmup_steps=4000,\
-lrate_strategy="noam",\
-epoches=5000,\
-update_cycle=4,\
-gpus=[0],\
-disp_freq=1,\
-eval_freq=5000,\
-sample_freq=1000,\
-checkpoints=5,\
-max_training_steps=200000,\
-nthreads=8,\
-beta1=0.9,\
-beta2=0.98,\
-epsilon=1e-8,\
-random_seed=1234,\
-src_vocab_file="$data_dir/vocab.en",\
-tgt_vocab_file="$data_dir/vocab.de",\
-src_train_file="$data_dir/train.32k.en.shuf",\
-tgt_train_file="$data_dir/train.32k.de.shuf",\
-src_dev_file="$data_dir/dev.32k.en",\
-tgt_dev_file="$data_dir/dev.32k.de",\
-src_test_file="$data_dir/newstest2014.32k.en",\
-tgt_test_file="$data_dir/newstest2014.de",\
-output_dir="train",\
-test_output=""
 ```
->If you dislike this long command line, you can also write the parameters into a separate config.py file using
-command like --config config.py. Data in config.py is a simple `dict` object.
 
-More details can be found [here](../usage/README.md).
+Other details can be found [here](../usage).
 
-Pretrained models can be found [here](http://data.statmt.org/bzhang/emnlp19_deep_transformer/).
+### Performance and Download
 
-### Performance
+We offer a range of [pretrained models](http://data.statmt.org/bzhang/emnlp19_deep_transformer/) for further study.
 
-| Task          | Model                               | BLEU  |
-|---------------|-------------------------------------|-------|
-| WMT14 En-Fr   | Base Transformer + 6 Layers         | 39.09 |
-|               | Base Transformer + Ours + 12 Layers | 40.58 |
-| IWSLT14 De-En | Base Transformer + 6 Layers         | 34.41 |
-|               | Base Transformer + Ours + 12 Layers | 35.63 |
-| WMT18 En-Fr   | Base Transformer + 6 Layers         | 15.5  |
-|               | Base Transformer + Ours + 12 Layers | 15.8  |
-| WMT18 Zh-En   | Base Transformer + 6 Layers         | 21.1  |
-|               | Base Transformer + Ours + 12 Layers | 22.3  |
-| WMT14 En-De   | Base Transformer + 6 Layers         | 27.59 |
-|               | Base Transformer + Ours + 12 Layers | 28.55 |
-|               | Big Transformer + 6 Layers          | 29.07 |
-|               | Big Transformer + Ours + 12 Layers  | 29.47 |
+
+| Task          | Model                               | BLEU  | Download |
+|---------------|-------------------------------------|-------| -------- |
+| WMT14 En-Fr   | Base Transformer + 6 Layers         | 39.09 | |
+|               | Base Transformer + Ours + 12 Layers | 40.58 | |
+| IWSLT14 De-En | Base Transformer + 6 Layers         | 34.41 | |
+|               | Base Transformer + Ours + 12 Layers | 35.63 | |
+| WMT18 En-Fr   | Base Transformer + 6 Layers         | 15.5  | |
+|               | Base Transformer + Ours + 12 Layers | 15.8  | |
+| WMT18 Zh-En   | Base Transformer + 6 Layers         | 21.1  | |
+|               | Base Transformer + Ours + 12 Layers | 22.3  | |
+| WMT14 En-De   | Base Transformer + 6 Layers         | 27.59 | [download](http://data.statmt.org/bzhang/emnlp19_deep_transformer/model/base.tar.gz) |
+|               | Base Transformer + Ours + 12 Layers | 28.55 | |
+|               | Big Transformer + 6 Layers          | 29.07 | [download](http://data.statmt.org/bzhang/emnlp19_deep_transformer/model/big.tar.gz) |
+|               | Big Transformer + Ours + 12 Layers  | 29.47 | |
+|               | Base Transformer + Ours + 20 Layers | 28.67 | [download](http://data.statmt.org/bzhang/emnlp19_deep_transformer/model/base+fuse_init20.tar.gz) |
+|               | Base Transformer + Ours + 30 Layers | 28.86 | [download](http://data.statmt.org/bzhang/emnlp19_deep_transformer/model/base+fuse_init30.tar.gz) |
+|               | Big Transformer + Ours + 20 Layers  | 29.62 | [download](http://data.statmt.org/bzhang/emnlp19_deep_transformer/model/big+fuse_init20.tar.gz) |
+
+Please go to [pretrained models](http://data.statmt.org/bzhang/emnlp19_deep_transformer/) for more details.
 
 ### Citation
 

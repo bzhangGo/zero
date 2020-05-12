@@ -126,7 +126,8 @@ We employ `sacrebleu` for all evaluation.
 ### More Results
 
 We format our paper by only reporting average BLEU scores. For those interested in concrete results for each 
-language pair, we provide more [detailed results](many-to-many.xlsx) for many-to-many translation.
+language pair, we provide more [detailed results](many-to-many-full-results-per-language.md) for many-to-many translation.
+We also provide an [excel document](many-to-many.xlsx) for downloading.
 
 ### Citation
 
