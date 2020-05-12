@@ -46,6 +46,8 @@ Training a multilingual model is time-consuming. We spent several weeks for one 
 
 Model Description | Download
 ---|---
+`Base + 6 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Base-L6.tar.gz)
+`Base + 6 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Base-L6-RoBT.tar.gz)
 `Ours + 6 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L6.tar.gz)
 `Ours + 6 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L6-RoBT.tar.gz)
 `Ours + 12 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L12.tar.gz)
@@ -53,7 +55,10 @@ Model Description | Download
 `Ours + 24 layer` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L24.tar.gz)
 `Ours + 24 layer + RoBT` | [download](http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L24-RoBT.tar.gz)
 
-- `Ours`: transformer + [merged attention](https://github.com/bzhangGo/zero/blob/master/docs/depth_scale_init_and_merged_attention/README.md) + LaLn + LaLT
+- `Base`: transformer. Notice that to use these base models, you need the [master version of zero](https://github.com/bzhangGo/zero)
+rather than the multilingual one.
+
+- `Ours`: transformer + [merged attention](https://github.com/bzhangGo/zero/blob/master/docs/depth_scale_init_and_merged_attention) + LaLn + LaLT
 
 - Some different preprocessing used in our experiments (**not suggested!**)
     * We adopted "--character_coverage 0.9995 --input_sentence_size=10000000" for 
