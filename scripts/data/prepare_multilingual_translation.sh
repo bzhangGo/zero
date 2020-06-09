@@ -95,8 +95,8 @@ function handle_supervise {
         cat ${xx_train} | sed "s/^.*$/<2${tgt}>/g" >> ${out_path}/${prefix}.train.lang
     fi
     if [[ -f ${en_dev} ]]; then
-        cat ${en_dev} | head -n ${topn} | >> ${out_path}/${prefix}.dev.en
-        cat ${xx_dev} | head -n ${topn} | >> ${out_path}/${prefix}.dev.xx
+        cat ${en_dev} | head -n ${topn} >> ${out_path}/${prefix}.dev.en
+        cat ${xx_dev} | head -n ${topn} >> ${out_path}/${prefix}.dev.xx
         cat ${xx_dev} | head -n ${topn} | sed "s/^.*$/<2${tgt}>/g" >> ${out_path}/${prefix}.dev.lang
     fi
 }
