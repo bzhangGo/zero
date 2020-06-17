@@ -9,6 +9,9 @@ zero_path=$2
 # setup GPU settings
 export CUDA_VISIBLE_DEVICES=0
 
+# Note for `output_dir="avg"`
+# output_dir denotes the trained model's directory; and "avg" denotes averaged checkpoints
+# this can be obtained by running ${zero_path}/scripts/checkpoint_averaging.py
 
 # get language information
 source ${zero_path}/scripts/data/common.sh
@@ -54,7 +57,7 @@ tgt_vocab_file="${data_path}/vocab.zero.tgt",\
 to_lang_vocab_file="${data_path}/vocab.zero.lang",\
 src_test_file="${src}",\
 tgt_test_file="${ref}",\
-output_dir="avg"
+output_dir="avg",\
 test_output="${out}.trans.bpe.txt",\
 
 python3 ${zero_path}/scripts/spm_decode.py \
