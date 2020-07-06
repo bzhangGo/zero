@@ -8,7 +8,8 @@ with a goal of improving zero-shot translation.
 * On massively multilingual translation, we collected OPUS-100, a 100-language multilingual dataset from OPUS.
 We release this dataset to help further study on this direction.
 
-  - [the OPUS-100 dataset](https://github.com/EdinburghNLP/opus-100-corpus)
+  - [the OPUS-100 dataset](https://github.com/EdinburghNLP/opus-100-corpus); or
+  - [the OPUS website](http://opus.nlpl.eu/opus-100.php)
 
 * Multilingual model requires stronger capacity to support various language pairs. We propose to 
 devise language-specific components: *1. language-aware layer normalization and 2. language-aware linear mapping* 
