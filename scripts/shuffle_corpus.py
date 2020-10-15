@@ -6,8 +6,7 @@ from __future__ import print_function
 
 import argparse
 import numpy
-
-"""Copyright 2018 The THUMT Authors"""
+import h5py
 
 
 def parseargs():
@@ -15,6 +14,8 @@ def parseargs():
 
     parser.add_argument("--corpus", nargs="+", required=True,
                         help="input corpora")
+    parser.add_argument("--audio", type=str, default="none",
+                        help="audio corpora")
     parser.add_argument("--suffix", type=str, default="shuf",
                         help="Suffix of output files")
     parser.add_argument("--seed", type=int, help="Random seed")
@@ -37,11 +38,23 @@ def main(args):
 
     newstream = [open(item + suffix, "w") for item in name]
 
-    for idx in indices.tolist():
+    if args.audio != "none":
+        audiostream = h5py.File(args.audio + suffix + ".h5", 'w')
+        audioreader = h5py.File(args.audio, 'r')
+
+    for h, idx in enumerate(indices.tolist()):
         lines = [item[idx] for item in data]
 
         for line, fd in zip(lines, newstream):
             fd.write(line)
+
+        if args.audio != "none":
+            audio = audioreader["audio_{}".format(idx)][()]
+            audiostream.create_dataset("audio_{}".format(h), data=audio)
+
+    if args.audio != "none":
+        audioreader.close()
+        audiostream.close()
 
     for fdr, fdw in zip(stream, newstream):
         fdr.close()

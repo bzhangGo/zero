@@ -126,7 +126,6 @@ def var_train(
         gamma=GAMMA,
         zeta=ZETA,
         eps=EPSILON):
-    """Model training, sampling hard concrete variables"""
     theta, log_alpha = weight_parameters
 
     # Sample the z values from the hard-concrete distribution
@@ -146,7 +145,8 @@ def l0_regularization_loss(l0_norm_loss,
                            start_reg_ramp_up=0,
                            end_reg_ramp_up=1000,
                            warm_up=True):
-    """Calculate the l0-norm weight for this iteration"""
+
+    # Calculate the l0-norm weight for this iteration
     step = tf.train.get_or_create_global_step()
     current_step_reg = tf.maximum(
         0.0,
@@ -167,11 +167,11 @@ def var_eval(
         weight_parameters,
         gamma=GAMMA,
         zeta=ZETA):
-    """Model evaluation, obtain mean value"""
     theta, log_alpha = weight_parameters
 
     # Use the mean of the learned hard-concrete distribution as the
     # deterministic weight noise at evaluation time
     weight_noise = hard_concrete_mean(log_alpha, gamma, zeta)
+    # weight_noise = tf.Print(weight_noise, [weight_noise[0, :, 0]], message="mean activation", summarize=2512)
     weights = theta * weight_noise
     return weights, weight_noise

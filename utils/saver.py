@@ -128,7 +128,7 @@ class Saver(object):
                     writer.write("{}\t{}\n".format(model_name, score))
                 writer.flush()
 
-    def restore(self, session, path=None):
+    def restore(self, session, path=None, filter_variables=False):
         if path is not None and tf.gfile.Exists(path):
             check_dir = path
         else:
@@ -160,7 +160,11 @@ class Saver(object):
                     for var in tf.global_variables():
                         name = var.op.name
 
-                        if reader.has_tensor(name):
+                        if (not filter_variables and reader.has_tensor(name)) or (
+                            filter_variables and reader.has_tensor(name) and 'decoder' not in name and
+                            'global_step' not in name and 'Adam' not in name and
+                            ('embedding' not in name or 'pos_embedding' in name)
+                        ):
                             tf.logging.info('{} get initialization from {}'
                                             .format(name, name))
                             ops.append(

@@ -1,88 +1,25 @@
-# Zero 
-A neural machine translation system implemented by python2 + tensorflow.
+# Adaptive Feature Selection for End-to-End Speech Translation
 
-## Features
-1. Multi-Process Data Loading/Processing (*Problems Exist*)
-2. Multi-GPU Training/Decoding
-3. Gradient Aggregation 
+This code base is an adaption of text-to-text `zero` to speech-to-text tasks, 
+particularly for end-to-end speech translation, along with our EMNLP findings paper:
+adaptive feature selection for end-to-end speech translation.
 
-## Papers
-* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop)
-* [Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation, ACL2020](docs/multilingual_laln_lalt)
-* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention)
+Unlike text-based machine translation, speech translation takes audio as its source
+input, which is often of higher diversity across different speakers, in terms of gender
+, style, accent and so on. Also, audio is often noisy and lengthy compared to its transcript.
+How to reduce such noises and extract more transcript-relevant speech signals/features is 
+a long-standing challenge for speech translation.
 
-## Supported Models
-* RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
-models.
-* CAEncoder: the context-aware recurrent encoder, see [the paper, TASLP](https://ieeexplore.ieee.org/document/8031316)
-    and the original [source code](https://github.com/DeepLearnXMU/CAEncoder-NMT) (in Theano).
-* Transformer: [attention is all you need](https://arxiv.org/abs/1706.03762)
-* AAN: the [average attention model, ACL2018](https://github.com/bzhangGo/transformer-aan) that accelerates the decoding!
-* Fixup: [Fixup Initialization: Residual Learning Without Normalization](https://arxiv.org/abs/1901.09321)
-* Relative position representation: [Self-Attention with Relative Position Representations](https://arxiv.org/abs/1803.02155)
+We propose `adaptive feature selection` that adopts [L0Drop](https://arxiv.org/abs/2004.11854)
+to automatically filter out speech features contributing little to speech recognition. Results
+on several benchmarks, including diverse language pairs, show that our method achieves substantial
+performance improvement compared to the vanilla pretrained baselines with only ~15% retrained 
+speech features.
 
-## Requirements
-* python2.7
-* tensorflow <= 1.13.2
+In this codebase, we provide scripts and instructions for MuST-C and LibriSpeech translation tasks. 
+* Please go to the [Example](./example/README.md) for more details.
+* Please go to [readme](https://github.com/bzhangGo/zero/blob/master/docs/afs_speech_translation/README.md)
+for more method description.
 
-## Usage
-[How to use this toolkit for machine translation?](docs/usage)
-
-## TODO:
-1. organize the parameters and interpretations in config.
-2. reformat and fulfill code comments
-3. simplify and remove unecessary coding
-4. improve rnn models 
-
-## Citation
-
-If you use the source code, please consider citing the follow paper:
-```
-@InProceedings{D18-1459,
-  author = 	"Zhang, Biao
-		and Xiong, Deyi
-		and su, jinsong
-		and Lin, Qian
-		and Zhang, Huiji",
-  title = 	"Simplifying Neural Machine Translation with Addition-Subtraction Twin-Gated Recurrent Networks",
-  booktitle = 	"Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing",
-  year = 	"2018",
-  publisher = 	"Association for Computational Linguistics",
-  pages = 	"4273--4283",
-  location = 	"Brussels, Belgium",
-  url = 	"http://aclweb.org/anthology/D18-1459"
-}
-```
-
-If you are interested in the CAEncoder model, please consider citing our TASLP paper:
-```
-@article{Zhang:2017:CRE:3180104.3180106,
- author = {Zhang, Biao and Xiong, Deyi and Su, Jinsong and Duan, Hong},
- title = {A Context-Aware Recurrent Encoder for Neural Machine Translation},
- journal = {IEEE/ACM Trans. Audio, Speech and Lang. Proc.},
- issue_date = {December 2017},
- volume = {25},
- number = {12},
- month = dec,
- year = {2017},
- issn = {2329-9290},
- pages = {2424--2432},
- numpages = {9},
- url = {https://doi.org/10.1109/TASLP.2017.2751420},
- doi = {10.1109/TASLP.2017.2751420},
- acmid = {3180106},
- publisher = {IEEE Press},
- address = {Piscataway, NJ, USA},
-}
-```
-
-## Reference
-When developing this repository, I referred to the following projects:
-
-* [Nematus](https://github.com/EdinburghNLP/nematus)
-* [THUMT](https://github.com/thumt/THUMT)
-* [Tensor2Tensor](https://github.com/tensorflow/tensor2tensor)
-* [Keras](https://github.com/keras-team/keras)
-
-## Contact
-For any questions or suggestions, please feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)
+The source code and scripts are post-edited based on our initial implementation, which might contain
+ bugs. For any issues, please contact [Biao Zhang](B.Zhang@ed.ac.uk).

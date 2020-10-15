@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import h5py
 import numpy as np
 from utils.util import batch_indexer, token_indexer
 
@@ -15,34 +16,41 @@ class Dataset(object):
                  data_leak_ratio=0.5):
         self.source = src_file
         self.target = tgt_file
-        self.src_vocab = src_vocab
+        self.src_vocab = src_vocab         # Note source vocabulary here is meaningless
         self.tgt_vocab = tgt_vocab
-        self.max_len = max_len
+        self.max_len = max_len             # the maximum length limit for speech and text (should be separate?)
         self.batch_or_token = batch_or_token
         self.data_leak_ratio = data_leak_ratio
 
         self.leak_buffer = []
 
+    # loading dataset
     def load_data(self):
-        with open(self.source, 'r') as src_reader, \
-                open(self.target, 'r') as tgt_reader:
-            while True:
-                src_line = src_reader.readline()
-                tgt_line = tgt_reader.readline()
+        sources = self.source.strip().split(";")
+        targets = self.target.strip().split(";")
 
-                if src_line == "" or tgt_line == "":
-                    break
+        for source, target in zip(sources, targets):
+            with h5py.File(source, 'r') as src_reader, \
+                    open(target, 'r') as tgt_reader:
 
-                src_line = src_line.strip()
-                tgt_line = tgt_line.strip()
+                h = 0
+                while True:
+                    tgt_line = tgt_reader.readline()
 
-                if src_line == "" or tgt_line == "":
-                    continue
+                    if tgt_line == "":
+                        break
 
-                yield (
-                    self.src_vocab.to_id(src_line.strip().split()[:self.max_len]),
-                    self.tgt_vocab.to_id(tgt_line.strip().split()[:self.max_len])
-                )
+                    src_line = src_reader["audio_{}".format(h)][()]
+                    tgt_line = tgt_line.strip()
+                    h += 1
+
+                    if tgt_line == "":
+                        continue
+
+                    yield (
+                        src_line,
+                        self.tgt_vocab.to_id(tgt_line.split()[:self.max_len])
+                    )
 
     def to_matrix(self, batch):
         batch_size = len(batch)
@@ -50,10 +58,14 @@ class Dataset(object):
         src_lens = [len(sample[1]) for sample in batch]
         tgt_lens = [len(sample[2]) for sample in batch]
 
+        # source dimension, such as 40
+        src_dim = batch[0][1].shape[-1]
+
         src_len = min(self.max_len, max(src_lens))
         tgt_len = min(self.max_len, max(tgt_lens))
 
-        s = np.zeros([batch_size, src_len], dtype=np.int32)
+        s = np.zeros([batch_size, src_len, src_dim], dtype=np.float32)
+        m = np.zeros([batch_size, src_len], dtype=np.float32)
         t = np.zeros([batch_size, tgt_len], dtype=np.int32)
         x = []
         for eidx, sample in enumerate(batch):
@@ -62,7 +74,22 @@ class Dataset(object):
 
             s[eidx, :min(src_len, len(src_ids))] = src_ids[:src_len]
             t[eidx, :min(tgt_len, len(tgt_ids))] = tgt_ids[:tgt_len]
-        return x, s, t
+            m[eidx, :min(src_len, len(src_ids))] = 1.0
+
+        # construct sparse label sequence, for ctc training
+        seq_indexes = []
+        seq_values = []
+        for n, sample in enumerate(batch):
+            sequence = sample[2][:tgt_len]
+
+            seq_indexes.extend(zip([n] * len(sequence), range(len(sequence))))
+            seq_values.extend(sequence)
+
+        seq_indexes = np.asarray(seq_indexes, dtype=np.int64)
+        seq_values = np.asarray(seq_values, dtype=np.int32)
+        seq_shape = np.asarray([batch_size, tgt_len], dtype=np.int64)
+
+        return x, s, t, m, (seq_indexes, seq_values, seq_shape)
 
     def batcher(self, size, buffer_size=1000, shuffle=True, train=True):
         def _handle_buffer(_buffer):
@@ -81,10 +108,12 @@ class Dataset(object):
             for ioi in index_over_index:
                 index = buffer_index[ioi[0]]
                 batch = [sorted_buffer[ii] for ii in index]
-                x, s, t = self.to_matrix(batch)
+                x, s, t, m, spar = self.to_matrix(batch)
                 yield {
                     'src': s,
                     'tgt': t,
+                    'src_mask': m,
+                    'spar': spar,
                     'index': x,
                     'raw': batch,
                 }
@@ -97,7 +126,7 @@ class Dataset(object):
                 for data in _handle_buffer(buffer):
                     # check whether the data is tailed
                     batch_size = len(data['raw']) if self.batch_or_token == 'batch' \
-                        else max(np.sum(data['tgt'] > 0), np.sum(data['src'] > 0))
+                        else max(np.sum(data['tgt'] > 0), np.prod(data['src'].shape[:2]))
                     if batch_size < size * self.data_leak_ratio:
                         self.leak_buffer += data['raw']
                     else:
@@ -110,7 +139,7 @@ class Dataset(object):
             for data in _handle_buffer(buffer):
                 # check whether the data is tailed
                 batch_size = len(data['raw']) if self.batch_or_token == 'batch' \
-                    else max(np.sum(data['tgt'] > 0), np.sum(data['src'] > 0))
+                    else max(np.sum(data['tgt'] > 0), np.prod(data['src'].shape[:2]))
                 if train and batch_size < size * self.data_leak_ratio:
                     self.leak_buffer += data['raw']
                 else:

@@ -25,11 +25,12 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
     batch_size = tf.shape(features["source"])[0]
     if params.search_mode == "cache":
-        model_state = encoding_fn(features["source"])
+        model_state = encoding_fn(features["source"], features["source_mask"])
     else:
         model_state = features["source"]
 
-    src_mask = dtype.tf_to_float(tf.cast(features["source"], tf.bool))
+    # src_mask = dtype.tf_to_float(tf.cast(features["source"], tf.bool))
+    src_mask = features["source_mask"]
     source_length = tf.reduce_sum(src_mask, -1)
     max_target_length = source_length + decode_length
 

@@ -5,35 +5,83 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
+import numpy as np
 import tensorflow as tf
 
 import func
 from models import model
+from modules import l0_norm
 from utils import util, dtype
-from modules import fixup
 
 
-def encoder(source, params):
-    mask = dtype.tf_to_float(tf.cast(source, tf.bool))
+def custom_getter(getter, name, *args, **kwargs):
+    """
+    converting model parameters to be non-trainable.
+    here used for fixing ASR encoder parameters
+    """
+    kwargs['trainable'] = False
+    return getter(name, *args, **kwargs)
+
+
+def reshape_pyramidal(inputs, scale=2, mask=None):
+    """
+    Reshapes the given outputs, i.e. reduces the
+    time resolution by 2.
+    Similar to "Listen Attend Spell".
+    https://arxiv.org/pdf/1508.01211.pdf
+    """
+    # [batch_size, max_time, num_units]
+    batch_size, max_time, num_units = util.shape_list(inputs)
+
+    if mask is not None:
+        inputs *= tf.expand_dims(mask, -1)
+
+    num_pad = tf.cast(tf.ceil(tf.divide(max_time, scale)) * scale, tf.int32) - max_time
+
+    pads = [[0, 0], [0, num_pad], [0, 0]]
+    inputs = tf.pad(inputs, pads)
+
+    if mask is not None:
+        pads = [[0, 0], [0, num_pad]]
+        mask = tf.pad(mask, pads)
+
+    concat_inputs = tf.reshape(inputs, (batch_size, -1, num_units * scale))
+    if mask is not None:
+        concat_mask = tf.reshape(mask, (batch_size, -1, scale))
+        concat_mask = 1. - tf.to_float(tf.less(tf.reduce_sum(concat_mask, -1), scale))
+
+        return concat_inputs, concat_mask
+    else:
+        return concat_inputs
+
+
+def encoder(source, mask, params):
     hidden_size = params.hidden_size
-    initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
 
-    source, mask = util.remove_invalid_seq(source, mask)
+    # transformer going, random noise to make the training robust, this is not the spec-augmentation
+    if params.noise_dropout > 0.:
+        n_source = source + tf.random_normal(tf.shape(source), stddev=1.0 / np.iinfo(np.int16).max)
+        source = tf.cond(tf.random_uniform([]) < params.noise_dropout, lambda: n_source, lambda: source)
+    # tried different settings for scale, turns out 3 is good
+    source, mask = reshape_pyramidal(source, scale=3, mask=mask)
+    inputs = func.linear(source, params.embed_size, scope="emb_mapper", custom_getter=custom_getter)
+    # transformer is sensitive to the position encoding,
+    # parameterized position encoding is more stable than the sinusoid function
+    # by default, we keep the sinusoid encoding function due to its flexibility
+    if params.sinusoid_posenc:
+        inputs = func.add_timing_signal(inputs)
+    else:
+        pos_emb = tf.get_variable("pos_embedding", [params.max_poslen, params.embed_size], custom_getter=custom_getter)
 
-    embed_name = "embedding" if params.shared_source_target_embedding \
-        else "src_embedding"
-    src_emb = tf.get_variable(embed_name,
-                              [params.src_vocab.size(), params.embed_size],
-                              initializer=initializer)
-    src_bias = tf.get_variable("bias", [params.embed_size])
+        ishp = util.shape_list(inputs)
+        inputs += tf.expand_dims(pos_emb[:ishp[1]], 0)
 
-    inputs = tf.gather(src_emb, source) * (hidden_size ** 0.5)
-    inputs = tf.nn.bias_add(inputs, src_bias)
-    inputs = func.add_timing_signal(inputs)
+    # this normalization layer deeply stabilize the gradient and optimization issue
+    inputs = func.layer_norm(inputs, custom_getter=custom_getter)
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
-    with tf.variable_scope("encoder"):
+    with tf.variable_scope("encoder", custom_getter=custom_getter):
         x = inputs
         for layer in range(params.num_encoder_layer):
             if params.deep_transformer_init:
@@ -45,32 +93,33 @@ def encoder(source, params):
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
                 with tf.variable_scope("self_attention"):
-                    y = fixup.dot_attention(
-                        fixup.shift_layer(x),
+                    # we observe very large impact of the localization in self-attentions on translation quality.
+                    # suggest: encoder_localize-> log, decoder->none
+                    y = func.dot_attention(
+                        x,
                         None,
                         func.attention_bias(mask, "masking"),
                         hidden_size,
                         num_heads=params.num_heads,
                         dropout=params.attention_dropout,
-                        numblocks=params.num_encoder_layer*2+params.num_decoder_layer*3,
+                        localize=params.enc_localize,
+                        max_relative_position=params.max_relative_position,
                     )
 
                     y = y['output']
-                    y = fixup.scale_layer(y)
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                    x = func.layer_norm(x)
 
                 with tf.variable_scope("feed_forward"):
-                    y = fixup.ffn_layer(
+                    y = func.ffn_layer(
                         x,
                         params.filter_size,
                         hidden_size,
                         dropout=params.relu_dropout,
-                        numblocks=params.num_encoder_layer*2+params.num_decoder_layer*3,
                     )
 
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
-
-        x = fixup.scale_layer(fixup.shift_layer(x))
+                    x = func.layer_norm(x)
 
     source_encodes = x
     x_shp = util.shape_list(x)
@@ -88,7 +137,7 @@ def encoder(source, params):
     }
 
 
-def decoder(target, state, params):
+def decoder(target, state, params, labels=None):
     mask = dtype.tf_to_float(tf.cast(target, tf.bool))
     hidden_size = params.hidden_size
     initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
@@ -122,6 +171,88 @@ def decoder(target, state, params):
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
+    source_memory = state["encodes"]
+    source_mask = state["mask"]
+
+    # AFS^f, adaptive feature selection for feature dimension
+    if params.enable_afs_f:
+        neuron_pruning = tf.get_variable("neuron_pruning", [1, 1, hidden_size],
+                                         initializer=tf.zeros_initializer(),
+                                         trainable=False)
+        source_memory, neuron_mask = l0_norm.var_eval((source_memory, neuron_pruning))
+
+    # AFS^t, adaptive feature selection for temporal dimension
+    if params.enable_afs_t:
+        source_pruning = func.linear(state["encodes"], 1, scope="source_pruning", custom_getter=custom_getter)
+
+        # evaluation
+        # only support fast decoding, not training yet
+        source_memory, l0_mask = l0_norm.var_eval((source_memory, source_pruning))
+
+        l0_mask = dtype.tf_to_float(tf.cast(l0_mask, tf.bool))
+        l0_mask = tf.squeeze(l0_mask, -1) * source_mask
+
+        # indices of g_pos
+        # the last one is for zeros
+        k_value = tf.cast(tf.reduce_max(tf.reduce_sum(l0_mask, 1)), tf.int32)
+        k_value = tf.maximum(k_value, 1)
+        # batch_size x k_value
+        _, topk_indices = tf.nn.top_k(l0_mask, k_value)
+
+        # prepare coordinate
+        x_shp = util.shape_list(source_memory)
+        x_pos = util.batch_coordinates(x_shp[0], k_value)
+        coord = tf.stack([x_pos, topk_indices], axis=2)
+
+        g_x = tf.gather_nd(source_memory, coord)
+        g_mask = tf.gather_nd(l0_mask, coord)
+
+        source_memory = g_x
+        source_mask = g_mask
+
+    # the ASR encoder part is fixed, so we block gradient here
+    x = tf.stop_gradient(source_memory, name="grad_stopper")
+
+    # the ST encoder
+    with tf.variable_scope("enc_mt"):
+        x = func.add_timing_signal(x)
+        x = func.layer_norm(x)
+        for layer in range(params.num_encoder_layer):
+            if params.deep_transformer_init:
+                layer_initializer = tf.variance_scaling_initializer(
+                    params.initializer_gain * (layer + 1) ** -0.5,
+                    mode="fan_avg",
+                    distribution="uniform")
+            else:
+                layer_initializer = None
+            with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
+                with tf.variable_scope("self_attention"):
+                    y = func.dot_attention(
+                        x,
+                        None,
+                        func.attention_bias(source_mask, "masking"),
+                        hidden_size,
+                        num_heads=params.num_heads,
+                        dropout=params.attention_dropout
+                    )
+
+                    y = y['output']
+                    x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                    x = func.layer_norm(x)
+
+                with tf.variable_scope("feed_forward"):
+                    y = func.ffn_layer(
+                        x,
+                        params.filter_size,
+                        hidden_size,
+                        dropout=params.relu_dropout,
+                    )
+
+                    x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                    x = func.layer_norm(x)
+    source_memory = x
+
+    # the ST decoder
     with tf.variable_scope("decoder"):
         x = inputs
         for layer in range(params.num_decoder_layer):
@@ -134,16 +265,18 @@ def decoder(target, state, params):
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
                 with tf.variable_scope("self_attention"):
-                    y = fixup.dot_attention(
-                        fixup.shift_layer(x),
+                    y = func.dot_attention(
+                        x,
                         None,
                         func.attention_bias(tf.shape(mask)[1], "causal"),
                         hidden_size,
                         num_heads=params.num_heads,
                         dropout=params.attention_dropout,
-                        numblocks=params.num_encoder_layer*2+params.num_decoder_layer*3,
                         cache=None if is_training else
-                        state['decoder']['state']['layer_{}'.format(layer)]
+                        state['decoder']['state']['layer_{}'.format(layer)],
+                        localize=params.dec_localize,
+                        max_relative_position=params.max_relative_position,
+                        decode_step=None if is_training else state['time'],
                     )
                     if not is_training:
                         # k, v
@@ -151,20 +284,21 @@ def decoder(target, state, params):
                             .update(y['cache'])
 
                     y = y['output']
-                    y = fixup.scale_layer(y)
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                    x = func.layer_norm(x)
 
                 with tf.variable_scope("cross_attention"):
-                    y = fixup.dot_attention(
-                        fixup.shift_layer(x),
-                        state['encodes'],
-                        func.attention_bias(state['mask'], "masking"),
+                    y = func.dot_attention(
+                        x,
+                        source_memory,
+                        func.attention_bias(source_mask, "masking"),
                         hidden_size,
                         num_heads=params.num_heads,
                         dropout=params.attention_dropout,
-                        numblocks=params.num_encoder_layer*2+params.num_decoder_layer*3,
                         cache=None if is_training else
-                        state['decoder']['state']['layer_{}'.format(layer)]
+                        state['decoder']['state']['layer_{}'.format(layer)],
+                        localize=params.encdec_localize,
+                        max_relative_position=params.max_relative_position,
                     )
                     if not is_training:
                         # mk, mv
@@ -172,22 +306,19 @@ def decoder(target, state, params):
                             .update(y['cache'])
 
                     y = y['output']
-                    y = fixup.scale_layer(y)
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
+                    x = func.layer_norm(x)
 
                 with tf.variable_scope("feed_forward"):
-                    y = fixup.ffn_layer(
+                    y = func.ffn_layer(
                         x,
                         params.filter_size,
                         hidden_size,
                         dropout=params.relu_dropout,
-                        numblocks=params.num_encoder_layer*2+params.num_decoder_layer*3,
                     )
 
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
-
-        x = fixup.shift_layer(x)
-
+                    x = func.layer_norm(x)
     feature = x
     if 'dev_decode' in state:
         feature = x[:, -1, :]
@@ -198,7 +329,7 @@ def decoder(target, state, params):
         else embed_name
     softmax_emb = tf.get_variable(embed_name,
                                   [params.tgt_vocab.size(), params.embed_size],
-                                  initializer=tf.zeros_initializer())
+                                  initializer=initializer)
     feature = tf.reshape(feature, [-1, params.embed_size])
     logits = tf.matmul(feature, softmax_emb, False, True)
 
@@ -219,6 +350,23 @@ def decoder(target, state, params):
     per_sample_loss = tf.reduce_sum(centropy * mask, -1) / tf.reduce_sum(mask, -1)
     loss = tf.reduce_mean(per_sample_loss)
 
+    if is_training and params.ctc_enable:
+        assert labels is not None
+
+        # batch x seq x dim
+        encoding = source_memory
+        enc_logits = func.linear(encoding, params.tgt_vocab.size() + 1, scope="ctc_mapper")
+        # seq dimension transpose
+        enc_logits = tf.transpose(enc_logits, (1, 0, 2))
+
+        with tf.name_scope('loss'):
+            ctc_loss = tf.nn.ctc_loss(labels, enc_logits, tf.cast(tf.reduce_sum(state['mask'], -1), tf.int32),
+                                      ignore_longer_outputs_than_inputs=True)
+            ctc_loss /= tf.reduce_sum(mask, -1)
+            ctc_loss = tf.reduce_mean(ctc_loss)
+
+        loss = params.ctc_alpha * ctc_loss + (1. - params.ctc_alpha) * loss
+
     # these mask tricks mainly used to deal with zero shapes, such as [0, 1]
     loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
                    lambda: tf.constant(0, tf.float32),
@@ -233,8 +381,9 @@ def train_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
-        loss, logits, state, _ = decoder(features['target'], state, params)
+        state = encoder(features['source'], features['source_mask'], params)
+        loss, logits, state, _ = decoder(features['target'], state, params,
+                                         labels=features['label'] if params.ctc_enable else None)
 
         return {
             "loss": loss
@@ -250,7 +399,7 @@ def score_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
+        state = encoder(features['source'], features['source_mask'], params)
         _, _, _, scores = decoder(features['target'], state, params)
 
         return {
@@ -262,12 +411,12 @@ def infer_fn(params):
     params = copy.copy(params)
     params = util.closing_dropout(params)
 
-    def encoding_fn(source):
+    def encoding_fn(source, mask):
         with tf.variable_scope(params.scope_name or "model",
                                reuse=tf.AUTO_REUSE,
                                dtype=tf.as_dtype(dtype.floatx()),
                                custom_getter=dtype.float32_variable_storage_getter):
-            state = encoder(source, params)
+            state = encoder(source, mask, params)
             state["decoder"] = {
                 "state": state["decoder_initializer"]
             }
@@ -284,7 +433,8 @@ def infer_fn(params):
                     target, state, params)
                 del state['time']
             else:
-                estate = encoder(state, params)
+                # not implemented
+                estate = encoder(state, None, params)
                 estate['dev_decode'] = True
                 _, step_logits, _, _ = decoder(target, estate, params)
                 step_state = state
@@ -295,4 +445,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("transformer_fixup", train_fn, score_fn, infer_fn)
+model.model_register("transformer_afs_st", train_fn, score_fn, infer_fn)

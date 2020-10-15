@@ -145,7 +145,7 @@ def train(params):
                             params.src_vocab, params.tgt_vocab, params.max_len,
                             batch_or_token=params.batch_or_token,
                             data_leak_ratio=params.data_leak_ratio)
-    dev_dataset = Dataset(params.src_dev_file, params.src_dev_file,
+    dev_dataset = Dataset(params.src_dev_file, params.tgt_dev_file,
                           params.src_vocab, params.src_vocab, params.eval_max_len,
                           batch_or_token='batch',
                           data_leak_ratio=params.data_leak_ratio)
@@ -160,8 +160,10 @@ def train(params):
         features = []
         for fidx in range(max(len(params.gpus), 1)):
             feature = {
-                "source": tf.placeholder(tf.int32, [None, None], "source"),
+                "source": tf.placeholder(tf.float32, [None, None, params.speech_num_feature], "source"),
+                "source_mask": tf.placeholder(tf.float32, [None, None], "source_mask"),
                 "target": tf.placeholder(tf.int32, [None, None], "target"),
+                "label": tf.sparse_placeholder(tf.int32, name="label"),
             }
             features.append(feature)
 
@@ -219,8 +221,8 @@ def train(params):
         cum_tokens = []
 
         # restore parameters
-        tf.logging.info("Trying restore pretrained parameters")
-        train_saver.restore(sess, path=params.pretrained_model)
+        tf.logging.info("Trying restore ASR existing parameters")
+        train_saver.restore(sess, path=params.asr_pretrain, filter_variables=params.filter_variables)
 
         tf.logging.info("Trying restore existing parameters")
         train_saver.restore(sess)
@@ -288,7 +290,9 @@ def train(params):
                     # define feed_dict
                     feed_dict = {
                         features[fidx]["source"]: shard_data["src"],
+                        features[fidx]["source_mask"]: shard_data["src_mask"],
                         features[fidx]["target"]: shard_data["tgt"],
+                        features[fidx]["label"]: shard_data["spar"],
                         lr: adapt_lr.get_lr(),
                     }
                     feed_dicts.update(feed_dict)
@@ -379,7 +383,8 @@ def train(params):
                         # save eval translation
                         evalu.dump_tanslation(
                             tranes,
-                            os.path.join(params.output_dir, "eval-{}.trans.txt".format(gstep)),
+                            os.path.join(params.output_dir,
+                                         "eval-{}.trans.txt".format(gstep)),
                             indices=indices)
 
                         # save parameters
@@ -396,9 +401,14 @@ def train(params):
                                 params.recorder.estop = True
                                 break
 
-                        params.recorder.history_scores.append((gstep, float(np.mean(scores))))
-                        params.recorder.valid_script_scores.append((gstep, float(bleu)))
-                        params.recorder.save_to_json(os.path.join(params.output_dir, "record.json"))
+                        params.recorder.history_scores.append(
+                            (int(gstep), float(np.mean(scores)))
+                        )
+                        params.recorder.valid_script_scores.append(
+                            (int(gstep), float(bleu))
+                        )
+                        params.recorder.save_to_json(
+                            os.path.join(params.output_dir, "record.json"))
 
                         # handle the learning rate decay in a typical manner
                         adapt_lr.after_eval(float(bleu))
@@ -407,12 +417,12 @@ def train(params):
                     if gstep > 0 and gstep % params.sample_freq == 0:
                         tf.logging.info("Start Sampling")
                         decode_seqs, decode_scores = sess.run(
-                            [eval_seqs[:1], eval_scores[:1]], feed_dict={features[0]["source"]: data["src"][:5]})
+                            [eval_seqs[:1], eval_scores[:1]], feed_dict={features[0]["source"]: data["src"][:5], features[0]["source_mask"]: data["src_mask"][:5]})
                         tranes, scores = evalu.decode_hypothesis(decode_seqs, decode_scores, params)
 
                         for sidx in range(min(5, len(scores))):
-                            sample_source = evalu.decode_target_token(data['src'][sidx], params.src_vocab)
-                            tf.logging.info("{}-th Source: {}".format(sidx, ' '.join(sample_source)))
+                            # sample_source = evalu.decode_target_token(data['src'][sidx], params.src_vocab)
+                            # tf.logging.info("{}-th Source: {}".format(sidx, ' '.join(sample_source)))
                             sample_target = evalu.decode_target_token(data['tgt'][sidx], params.tgt_vocab)
                             tf.logging.info("{}-th Target: {}".format(sidx, ' '.join(sample_target)))
                             sample_trans = tranes[sidx]
@@ -427,7 +437,7 @@ def train(params):
                         break
 
                     # should be equal to global_step
-                    params.recorder.step = gstep
+                    params.recorder.step = int(gstep)
 
             if params.recorder.estop:
                 tf.logging.info("Early Stopped!")
@@ -462,7 +472,8 @@ def train(params):
     # save eval translation
     evalu.dump_tanslation(
         tranes,
-        os.path.join(params.output_dir, "eval-{}.trans.txt".format(gstep)),
+        os.path.join(params.output_dir,
+                     "eval-{}.trans.txt".format(gstep)),
         indices=indices)
 
     tf.logging.info("Your training is finished :)")
@@ -474,7 +485,7 @@ def evaluate(params):
     # loading dataset
     tf.logging.info("Begin Loading Test Dataset")
     start_time = time.time()
-    test_dataset = Dataset(params.src_test_file, params.src_test_file,
+    test_dataset = Dataset(params.src_test_file, params.tgt_test_file,
                            params.src_vocab, params.src_vocab, params.eval_max_len,
                            batch_or_token='batch',
                            data_leak_ratio=params.data_leak_ratio)
@@ -486,7 +497,8 @@ def evaluate(params):
         features = []
         for fidx in range(max(len(params.gpus), 1)):
             feature = {
-                "source": tf.placeholder(tf.int32, [None, None], "source"),
+                "source": tf.placeholder(tf.float32, [None, None, params.speech_num_feature], "source"),
+                "source_mask": tf.placeholder(tf.float32, [None, None], "source_mask"),
             }
             features.append(feature)
 

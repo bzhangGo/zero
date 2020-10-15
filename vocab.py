@@ -37,7 +37,7 @@ class Vocab(object):
         return len(self.word2id)
 
     def load_vocab(self, vocab_file):
-        with open(vocab_file, 'r') as reader:
+        with open(vocab_file, 'r', encoding='utf-8') as reader:
             for token in reader:
                 self.insert(token.strip())
 

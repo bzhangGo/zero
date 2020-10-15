@@ -14,7 +14,7 @@ from utils import util, dtype
 def linear(x, dim, bias=True, ln=False,
            weight_initializer=None,
            bias_initializer=tf.zeros_initializer(),
-           scope=None):
+           scope=None, custom_getter=None):
     """
     basic linear or feed forward layer
     :param x: input tensor or list
@@ -27,7 +27,8 @@ def linear(x, dim, bias=True, ln=False,
     :return:
     """
     with tf.variable_scope(scope or "linear", values=[x],
-                           dtype=tf.as_dtype(dtype.floatx())):
+                           dtype=tf.as_dtype(dtype.floatx()),
+                           custom_getter=custom_getter):
         if not isinstance(x, (list, tuple)):
             x = [x]
         if not isinstance(dim, (list, tuple)):
@@ -165,7 +166,7 @@ def dot_attention(query, memory, mem_mask, hidden_size,
                   ln=False, num_heads=1, cache=None, dropout=None,
                   use_relative_pos=False, max_relative_position=16,
                   out_map=True, scope=None, fuse_mask=None,
-                  decode_step=None):
+                  decode_step=None, localize=None):
     """
     dotted attention model
     :param query: [batch_size, qey_len, dim]
@@ -240,6 +241,42 @@ def dot_attention(query, memory, mem_mask, hidden_size,
         if mem_mask is not None:
             logits += mem_mask
 
+        # consider localization
+        if localize is not None and localize != "none":
+            k_len = k_shp[2]
+
+            q_rng = tf.range(q_len)
+            k_rng = tf.range(k_len)
+
+            # shape: len_Q x len_K
+            dist = tf.expand_dims(q_rng, 1) - tf.expand_dims(k_rng, 0)
+
+            if localize == "log":
+                dist = tf.abs(dist) + 1
+                log_dist = tf.log(tf.to_float(dist))
+                if r_lst is not None:
+                    log_dist = log_dist[-r_lst:]
+                logits -= tf.expand_dims(tf.expand_dims(log_dist, 0), 0)
+            elif localize == "feature":
+                vocab_size = max_relative_position * 2 + 1
+                depth = num_heads
+
+                dist_clipped = tf.clip_by_value(dist, -max_relative_position, max_relative_position)
+
+                # Shift values to be >= 0. Each integer still uniquely identifies a relative
+                # position difference.
+                dist = dist_clipped + max_relative_position
+                if r_lst is not None:
+                    dist = dist[-r_lst:]
+
+                pos_embedding = tf.get_variable("embeddings", [vocab_size, depth])
+                # len_Q x len_K x num_heads
+                dist_emb = tf.gather(pos_embedding, dist)
+                dist_emb = tf.transpose(dist_emb, [2, 0, 1])
+                logits += tf.expand_dims(dist_emb, 0)
+            else:
+                raise NotImplementedError("invalid localization function {}".format(localize))
+
         weights = tf.nn.softmax(logits)
 
         dweights = util.valid_apply_dropout(weights, dropout)
@@ -286,12 +323,13 @@ def dot_attention(query, memory, mem_mask, hidden_size,
         return results
 
 
-def layer_norm(x, eps=None, scope=None):
+def layer_norm(x, eps=None, scope=None, custom_getter=None):
     """Layer normalization layer"""
     if eps is None:
         eps = dtype.epsilon()
     with tf.variable_scope(scope or "layer_norm",
-                           dtype=tf.as_dtype(dtype.floatx())):
+                           dtype=tf.as_dtype(dtype.floatx()),
+                           custom_getter=custom_getter):
         layer_size = util.shape_list(x)[-1]
 
         scale = tf.get_variable("scale", [layer_size], initializer=tf.ones_initializer())
@@ -373,7 +411,7 @@ def attention_bias(inputs, mode, inf=None, name=None):
     """ A bias tensor used in attention mechanism"""
 
     if inf is None:
-        inf = dtype.inf()
+        inf = - dtype.inf()
 
     with tf.name_scope(name, default_name="attention_bias", values=[inputs]):
         if mode == "causal":
@@ -381,11 +419,11 @@ def attention_bias(inputs, mode, inf=None, name=None):
             lower_triangle = tf.matrix_band_part(
                 tf.ones([length, length]), -1, 0
             )
-            ret = dtype.tf_to_float(- inf * (1.0 - lower_triangle))
+            ret = dtype.tf_to_float(inf * (1.0 - lower_triangle))
             return tf.reshape(ret, [1, 1, length, length])
         elif mode == "masking":
             mask = inputs
-            ret = (1.0 - mask) * - inf
+            ret = (1.0 - mask) * inf
             return tf.expand_dims(tf.expand_dims(ret, 1), 1)
         elif mode == "aan":
             length = tf.shape(inputs)[1]
@@ -393,7 +431,7 @@ def attention_bias(inputs, mode, inf=None, name=None):
             cum_factor = tf.expand_dims(tf.cumsum(diagonal, axis=0), 0)
             mask = tf.expand_dims(inputs, 1) * tf.expand_dims(inputs, 2)
             mask *= dtype.tf_to_float(cum_factor)
-            weight = tf.nn.softmax(mask + (1.0 - mask) * - inf)
+            weight = tf.nn.softmax(mask + (1.0 - mask) * inf)
             weight *= mask
             return weight
         else:

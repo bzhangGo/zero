@@ -48,10 +48,10 @@ def token_indexer(dataset, token_size):
             if _counter * l >= token_size:
                 # when an extreme instance occur, handle it by making a 1-size batch
                 if _counter > 1:
-                    batchindex.append(dataindex[i-_counter+1: i])
+                    batchindex.append(dataindex[i - _counter + 1: i])
                     i -= 1
                 else:
-                    batchindex.append(dataindex[i: i+1])
+                    batchindex.append(dataindex[i: i + 1])
 
                 _counter = 0
                 _batcher = [0.] * len(dataset[0])
@@ -118,6 +118,19 @@ def dict_update(d, u):
     return d
 
 
+def embedding_to_padding(emb):
+    """Calculates the padding mask based on which embeddings are all zero.
+      We have hacked symbol_modality to return all-zero embeddings for padding.
+      Args:
+        emb: a Tensor with shape [..., depth].
+      Returns:
+        a float Tensor with shape [...]. Each element is 1 if its corresponding
+        embedding vector is all zero, and is 0 otherwise.
+    """
+    emb_sum = tf.reduce_sum(tf.abs(emb), axis=-1)
+    return tf.to_float(tf.equal(emb_sum, 0.0))
+
+
 def shape_list(x):
     # Copied from Tensor2Tensor
     """Return list of dims, statically where possible."""
@@ -155,8 +168,8 @@ def merge_neighbor_dims(x, axis=0):
         return x
 
     shape = shape_list(x)
-    shape[axis] *= shape[axis+1]
-    shape.pop(axis+1)
+    shape[axis] *= shape[axis + 1]
+    shape.pop(axis + 1)
     return tf.reshape(x, shape)
 
 
@@ -167,7 +180,7 @@ def unmerge_neighbor_dims(x, depth, axis=0):
 
     shape = shape_list(x)
     width = shape[axis] // depth
-    new_shape = shape[:axis] + [depth, width] + shape[axis+1:]
+    new_shape = shape[:axis] + [depth, width] + shape[axis + 1:]
     return tf.reshape(x, new_shape)
 
 

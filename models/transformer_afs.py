@@ -5,35 +5,70 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
+import numpy as np
 import tensorflow as tf
 
 import func
 from models import model
+from modules import l0_norm
 from utils import util, dtype
 
 
-# Implementation of Average Attention Network from:
-# Accelerating Neural Transformer via an Average Attention Network
-# http://aclweb.org/anthology/P18-1166
+def reshape_pyramidal(inputs, scale=2, mask=None):
+    """
+    Reshapes the given outputs, i.e. reduces the
+    time resolution by 2.
+    Similar to "Listen Attend Spell".
+    https://arxiv.org/pdf/1508.01211.pdf
+    """
+    # [batch_size, max_time, num_units]
+    batch_size, max_time, num_units = util.shape_list(inputs)
+
+    if mask is not None:
+        inputs *= tf.expand_dims(mask, -1)
+
+    num_pad = tf.cast(tf.ceil(tf.divide(max_time, scale)) * scale, tf.int32) - max_time
+
+    pads = [[0, 0], [0, num_pad], [0, 0]]
+    inputs = tf.pad(inputs, pads)
+
+    if mask is not None:
+        pads = [[0, 0], [0, num_pad]]
+        mask = tf.pad(mask, pads)
+
+    concat_inputs = tf.reshape(inputs, (batch_size, -1, num_units * scale))
+    if mask is not None:
+        concat_mask = tf.reshape(mask, (batch_size, -1, scale))
+        concat_mask = 1. - tf.to_float(tf.less(tf.reduce_sum(concat_mask, -1), scale))
+
+        return concat_inputs, concat_mask
+    else:
+        return concat_inputs
 
 
-def encoder(source, params):
-    mask = dtype.tf_to_float(tf.cast(source, tf.bool))
+def encoder(source, mask, params):
     hidden_size = params.hidden_size
-    initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
 
-    source, mask = util.remove_invalid_seq(source, mask)
+    # transformer going, random noise to make the training robust, this is not the spec-augmentation
+    if params.noise_dropout > 0.:
+        n_source = source + tf.random_normal(tf.shape(source), stddev=1.0 / np.iinfo(np.int16).max)
+        source = tf.cond(tf.random_uniform([]) < params.noise_dropout, lambda: n_source, lambda: source)
+    # tried different settings for scale, turns out 3 is good
+    source, mask = reshape_pyramidal(source, scale=3, mask=mask)
+    inputs = func.linear(source, params.embed_size, scope="emb_mapper")
+    # transformer is sensitive to the position encoding,
+    # parameterized position encoding is more stable than the sinusoid function
+    # by default, we keep the sinusoid encoding function due to its flexibility
+    if params.sinusoid_posenc:
+        inputs = func.add_timing_signal(inputs)
+    else:
+        pos_emb = tf.get_variable("pos_embedding", [params.max_poslen, params.embed_size])
 
-    embed_name = "embedding" if params.shared_source_target_embedding \
-        else "src_embedding"
-    src_emb = tf.get_variable(embed_name,
-                              [params.src_vocab.size(), params.embed_size],
-                              initializer=initializer)
-    src_bias = tf.get_variable("bias", [params.embed_size])
+        ishp = util.shape_list(inputs)
+        inputs += tf.expand_dims(pos_emb[:ishp[1]], 0)
 
-    inputs = tf.gather(src_emb, source) * (hidden_size ** 0.5)
-    inputs = tf.nn.bias_add(inputs, src_bias)
-    inputs = func.add_timing_signal(inputs)
+    # this normalization layer deeply stabilize the gradient and optimization issue
+    inputs = func.layer_norm(inputs)
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
@@ -49,13 +84,17 @@ def encoder(source, params):
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
                 with tf.variable_scope("self_attention"):
+                    # we observe very large impact of the localization in self-attentions on translation quality.
+                    # suggest: encoder_localize-> log, decoder->none
                     y = func.dot_attention(
                         x,
                         None,
                         func.attention_bias(mask, "masking"),
                         hidden_size,
                         num_heads=params.num_heads,
-                        dropout=params.attention_dropout
+                        dropout=params.attention_dropout,
+                        localize=params.enc_localize,
+                        max_relative_position=params.max_relative_position,
                     )
 
                     y = y['output']
@@ -80,8 +119,8 @@ def encoder(source, params):
         "encodes": source_encodes,
         "decoder_initializer": {
             "layer_{}".format(l): {
-                # plan aan
-                "aan": dtype.tf_to_float(tf.zeros([x_shp[0], 1, hidden_size])),
+                "k": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
+                "v": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
             }
             for l in range(params.num_decoder_layer)
         },
@@ -89,35 +128,7 @@ def encoder(source, params):
     }
 
 
-def average_attention_strategy(strategy, x, mask, state, layer, params):
-    strategy = strategy.lower()
-
-    is_training = ('decoder' not in state)
-
-    if strategy == "aan":
-        if is_training:
-            if params.aan_mask:
-                aan_bias = func.attention_bias(mask, "aan")
-                x_fwd = tf.matmul(aan_bias, x)
-            else:
-                aan_bias = tf.cumsum(mask, axis=1)
-                aan_bias = tf.where(tf.less_equal(aan_bias, 0.),
-                                    tf.ones_like(aan_bias), aan_bias)
-                aan_bias = tf.expand_dims(dtype.tf_to_float(aan_bias), 2)
-
-                x_fwd = tf.cumsum(x, axis=1) / aan_bias
-        else:
-            cache = state['decoder']['state']['layer_{}'.format(layer)]
-            x_fwd = (x + cache['aan']) / dtype.tf_to_float(state['time'] + 1)
-            cache['aan'] = x + cache['aan']
-
-        return x_fwd
-
-    else:
-        raise NotImplementedError("Not supported: {}".format(strategy))
-
-
-def decoder(target, state, params):
+def decoder(target, state, params, labels=None):
     mask = dtype.tf_to_float(tf.cast(target, tf.bool))
     hidden_size = params.hidden_size
     initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
@@ -151,6 +162,50 @@ def decoder(target, state, params):
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
+    source_memory = state["encodes"]
+    source_mask = state["mask"]
+
+    # AFS^t, adaptive feature selection for temporal dimension
+    if params.enable_afs_t:
+        source_pruning = func.linear(source_memory, 1, scope="source_pruning")
+
+        if is_training:  # training
+            source_memory, l0_mask = l0_norm.var_train((source_memory, source_pruning))
+            l0_norm_loss = tf.squeeze(l0_norm.l0_norm(source_pruning), -1)
+            l0_norm_loss = tf.reduce_sum(l0_norm_loss * source_mask, -1) / tf.reduce_sum(source_mask, -1)
+            l0_norm_loss = tf.reduce_mean(l0_norm_loss)
+            l0_norm_loss = l0_norm.l0_regularization_loss(
+                l0_norm_loss,
+                reg_scalar=params.l0_norm_reg_scalar,
+                start_reg_ramp_up=params.l0_norm_start_reg_ramp_up,
+                end_reg_ramp_up=params.l0_norm_end_reg_ramp_up,
+                warm_up=params.l0_norm_warm_up,
+            )
+        else:  # evaluation
+            source_memory, l0_mask = l0_norm.var_eval((source_memory, source_pruning))
+            l0_norm_loss = 0.0
+
+    # AFS^f, adaptive feature selection for feature dimension
+    if params.enable_afs_f:
+        neuron_pruning = tf.get_variable("neuron_pruning", [1, 1, hidden_size], initializer=tf.zeros_initializer())
+
+        # for neuron
+        if is_training:  # training
+            source_memory, neuron_mask = l0_norm.var_train((source_memory, neuron_pruning))
+            neuron_loss = tf.squeeze(l0_norm.l0_norm(neuron_pruning), 1)
+            neuron_loss = tf.reduce_mean(neuron_loss, -1)
+            neuron_loss = tf.reduce_mean(neuron_loss)
+            neuron_loss = l0_norm.l0_regularization_loss(
+                neuron_loss,
+                reg_scalar=params.l0_norm_reg_scalar,
+                start_reg_ramp_up=params.l0_norm_start_reg_ramp_up,
+                end_reg_ramp_up=params.l0_norm_end_reg_ramp_up,
+                warm_up=params.l0_norm_warm_up,
+            )
+        else:  # evaluation
+            source_memory, neuron_mask = l0_norm.var_eval((source_memory, neuron_pruning))
+            neuron_loss = 0.0
+
     with tf.variable_scope("decoder"):
         x = inputs
         for layer in range(params.num_decoder_layer):
@@ -162,49 +217,45 @@ def decoder(target, state, params):
             else:
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
-                with tf.variable_scope("average_attention"):
-                    x_fwds = []
-                    for strategy in params.strategies:
-                        with tf.variable_scope(strategy):
-                            x_fwd = average_attention_strategy(
-                                strategy, x, mask, state, layer, params)
-                            x_fwds.append(x_fwd)
-                    x_fwd = tf.add_n(x_fwds) / len(x_fwds)
+                with tf.variable_scope("self_attention"):
+                    y = func.dot_attention(
+                        x,
+                        None,
+                        func.attention_bias(tf.shape(mask)[1], "causal"),
+                        hidden_size,
+                        num_heads=params.num_heads,
+                        dropout=params.attention_dropout,
+                        cache=None if is_training else
+                        state['decoder']['state']['layer_{}'.format(layer)],
+                        localize=params.dec_localize,
+                        max_relative_position=params.max_relative_position,
+                        decode_step=None if is_training else state['time'],
+                    )
+                    if not is_training:
+                        # k, v
+                        state['decoder']['state']['layer_{}'.format(layer)] \
+                            .update(y['cache'])
 
-                    # FFN activation
-                    if params.use_ffn:
-                        y = func.ffn_layer(
-                            x_fwd,
-                            params.filter_size,
-                            hidden_size,
-                            dropout=params.relu_dropout,
-                        )
-                    else:
-                        y = x_fwd
-
-                    # Gating layer
-                    z = func.linear(tf.concat([x, y], axis=-1),
-                                    hidden_size * 2, scope="z_project")
-                    i, f = tf.split(z, 2, axis=-1)
-                    y = tf.sigmoid(i) * x + tf.sigmoid(f) * y
-
+                    y = y['output']
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
                     x = func.layer_norm(x)
 
                 with tf.variable_scope("cross_attention"):
                     y = func.dot_attention(
                         x,
-                        state['encodes'],
-                        func.attention_bias(state['mask'], "masking"),
+                        source_memory,
+                        func.attention_bias(source_mask, "masking"),
                         hidden_size,
                         num_heads=params.num_heads,
                         dropout=params.attention_dropout,
                         cache=None if is_training else
-                        state['decoder']['state']['layer_{}'.format(layer)]
+                        state['decoder']['state']['layer_{}'.format(layer)],
+                        localize=params.encdec_localize,
+                        max_relative_position=params.max_relative_position,
                     )
                     if not is_training:
                         # mk, mv
-                        state['decoder']['state']['layer_{}'.format(layer)]\
+                        state['decoder']['state']['layer_{}'.format(layer)] \
                             .update(y['cache'])
 
                     y = y['output']
@@ -252,9 +303,31 @@ def decoder(target, state, params):
     per_sample_loss = tf.reduce_sum(centropy * mask, -1) / tf.reduce_sum(mask, -1)
     loss = tf.reduce_mean(per_sample_loss)
 
+    if is_training and params.ctc_enable:
+        assert labels is not None
+
+        # batch x seq x dim
+        encoding = source_memory
+        enc_logits = func.linear(encoding, params.tgt_vocab.size() + 1, scope="ctc_mapper")
+        # seq dimension transpose
+        enc_logits = tf.transpose(enc_logits, (1, 0, 2))
+
+        with tf.name_scope('loss'):
+            ctc_loss = tf.nn.ctc_loss(labels, enc_logits, tf.cast(tf.reduce_sum(state['mask'], -1), tf.int32),
+                                      ignore_longer_outputs_than_inputs=True)
+            ctc_loss /= tf.reduce_sum(mask, -1)
+            ctc_loss = tf.reduce_mean(ctc_loss)
+
+        loss = params.ctc_alpha * ctc_loss + (1. - params.ctc_alpha) * loss
+
+    if params.enable_afs_t:
+        loss += l0_norm_loss
+    if params.enable_afs_f:
+        loss += neuron_loss
+
     # these mask tricks mainly used to deal with zero shapes, such as [0, 1]
     loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
-                   lambda: tf.constant(0, dtype=tf.float32),
+                   lambda: tf.constant(0, tf.float32),
                    lambda: loss)
 
     return loss, logits, state, per_sample_loss
@@ -266,8 +339,9 @@ def train_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
-        loss, logits, state, _ = decoder(features['target'], state, params)
+        state = encoder(features['source'], features['source_mask'], params)
+        loss, logits, state, _ = decoder(features['target'], state, params,
+                                         labels=features['label'] if params.ctc_enable else None)
 
         return {
             "loss": loss
@@ -283,7 +357,7 @@ def score_fn(features, params, initializer=None):
                            reuse=tf.AUTO_REUSE,
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
-        state = encoder(features['source'], params)
+        state = encoder(features['source'], features['source_mask'], params)
         _, _, _, scores = decoder(features['target'], state, params)
 
         return {
@@ -295,12 +369,12 @@ def infer_fn(params):
     params = copy.copy(params)
     params = util.closing_dropout(params)
 
-    def encoding_fn(source):
+    def encoding_fn(source, mask):
         with tf.variable_scope(params.scope_name or "model",
                                reuse=tf.AUTO_REUSE,
                                dtype=tf.as_dtype(dtype.floatx()),
                                custom_getter=dtype.float32_variable_storage_getter):
-            state = encoder(source, params)
+            state = encoder(source, mask, params)
             state["decoder"] = {
                 "state": state["decoder_initializer"]
             }
@@ -317,7 +391,8 @@ def infer_fn(params):
                     target, state, params)
                 del state['time']
             else:
-                estate = encoder(state, params)
+                # not implemented
+                estate = encoder(state, None, params)
                 estate['dev_decode'] = True
                 _, step_logits, _, _ = decoder(target, estate, params)
                 step_state = state
@@ -328,4 +403,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("transformer_aan", train_fn, score_fn, infer_fn)
+model.model_register("transformer_afs", train_fn, score_fn, infer_fn)

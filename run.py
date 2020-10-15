@@ -46,6 +46,23 @@ global_params = tc.training.HParams(
     # relative position encoding
     max_relative_position=16,
 
+    # speech feature number
+    # not that meaningful, we extracted mel features of dimension 40
+    #   after applying deltas, the feature grows to 120
+    audio_num_mel_bins=40,
+    audio_add_delta_deltas=True,
+    # this variable is the real one to indicate the dimension of speech features
+    speech_num_feature=120,
+
+    # AFS^t modelp
+    enable_afs_t=True,
+    # AFS^f model
+    enable_afs_f=False,
+    # ASR pretrained model path
+    asr_pretrain="",
+    # whether filter variables from ASR initialization, such as not initlaize global steps
+    filter_variables=False,
+
     # lrate decay
     # number of shards
     nstable=4,
@@ -163,8 +180,6 @@ global_params = tc.training.HParams(
     output_dir="",
     # output during testing
     test_output="",
-    # pretrained modeling
-    pretrained_model="",
 
     # adam optimizer hyperparameters
     beta1=0.9,
@@ -231,11 +246,22 @@ global_params = tc.training.HParams(
     dtype_inf=1e8,
     loss_scale=1.0,
 
+    # speech-specific settings
+    sinusoid_posenc=True,
+    max_poslen=2048,
+    ctc_enable=False,
+    ctc_alpha=0.3,      # ctc loss factor
+    noise_dropout=0.3,
+    enc_localize="log",
+    dec_localize="none",
+    encdec_localize="none",
+
     # l0drop related parameters
     l0_norm_reg_scalar=1.0,
     l0_norm_start_reg_ramp_up=0,
     l0_norm_end_reg_ramp_up=10000,
     l0_norm_warm_up=True,
+    l0_norm_context_aware=True,
 )
 
 flags = tf.flags
