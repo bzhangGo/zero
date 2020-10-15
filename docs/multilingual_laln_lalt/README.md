@@ -1,6 +1,7 @@
 ## Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation
 
-[paper](http://arxiv.org/abs/2004.11867)
+- [paper link](http://arxiv.org/abs/2004.11867)
+- source code is given in the [multilingual_laln_lalt branch](https://github.com/bzhangGo/zero/tree/multilingual_laln_lalt)
 
 We study massively multilingual translation in this paper, 
 with a goal of improving zero-shot translation.
@@ -8,8 +9,8 @@ with a goal of improving zero-shot translation.
 * On massively multilingual translation, we collected OPUS-100, a 100-language multilingual dataset from OPUS.
 We release this dataset to help further study on this direction.
 
-  - [the OPUS-100 dataset](https://github.com/EdinburghNLP/opus-100-corpus); or
-  - [the OPUS website](http://opus.nlpl.eu/opus-100.php)
+  - [the OPUS-100 dataset, Edinburgh](https://github.com/EdinburghNLP/opus-100-corpus); or
+  - [the OPUS website, OPUS](http://opus.nlpl.eu/opus-100.php)
 
 * Multilingual model requires stronger capacity to support various language pairs. We propose to 
 devise language-specific components: *1. language-aware layer normalization and 2. language-aware linear mapping* 

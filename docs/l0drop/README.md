@@ -1,6 +1,6 @@
 ## On Sparsifying Encoder Outputs in Sequence-to-Sequence Models
 
-[paper](http://arxiv.org/abs/2004.11854)
+- [paper link](http://arxiv.org/abs/2004.11854)
 
 Standard encoder-decoder models for sequence-to-sequence learning feed all encoder outputs to the decoder 
 for sequence generation. By contrast, we propose L0Drop which forces model to route information 

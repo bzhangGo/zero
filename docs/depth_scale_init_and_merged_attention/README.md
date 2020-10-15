@@ -1,6 +1,6 @@
 ## Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019
 
-[paper link](https://www.aclweb.org/anthology/D19-1083/)
+- [paper link](https://www.aclweb.org/anthology/D19-1083/)
 
 This paper focus on improving Deep Transformer. 
 Our empirical observation suggests that simply stacking more Transformer layers makes training divergent.
