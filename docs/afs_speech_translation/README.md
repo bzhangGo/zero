@@ -14,7 +14,7 @@ We propose `adaptive feature selection`, based on [L0Drop](https://arxiv.org/abs
 through a subset of speech features to support speech tasks. The learning process is automatic, with some hyperparameter
 controlling the degree of sparsity induced. Figure below shows the training procedure with AFS:
 
-<img src="afs_training.png"  width=800 />
+<img src="afs_training.png"  width=400 />
 
 And the example below shows the position of selected features used for 
 speech translation:
