@@ -17,8 +17,8 @@ performance improvement compared to the vanilla pretrained baselines with only ~
 speech features.
 
 In this codebase, we provide scripts and instructions for MuST-C and LibriSpeech translation tasks. 
-* Please go to the [Example](./example/README.md) for more details.
-* Please go to [readme](https://github.com/bzhangGo/zero/blob/master/docs/afs_speech_translation/README.md)
+* Please go to the [Example](./example) for more details.
+* Please go to [readme](https://github.com/bzhangGo/zero/blob/master/docs/afs_speech_translation)
 for more method description.
 
 The source code and scripts are post-edited based on our initial implementation, which might contain
