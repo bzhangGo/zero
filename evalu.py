@@ -19,6 +19,8 @@ def decode_target_token(id_seq, vocab):
                 or tok_id == vocab.pad():
             break
         valid_id_seq.append(tok_id)
+    # post process to recover the correct target sequence order
+    valid_id_seq = valid_id_seq[::2] + valid_id_seq[1::2][::-1]
     return vocab.to_tokens(valid_id_seq)
 
 

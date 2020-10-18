@@ -22,6 +22,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     alpha = params.decode_alpha
     eos_id = params.tgt_vocab.eos()
     pad_id = params.tgt_vocab.pad()
+    num_paral_tokens = max(params.ibdecoder_factor * 2, 1)
 
     batch_size = tf.shape(features["source"])[0]
     if params.search_mode == "cache":
@@ -47,7 +48,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     init_log_probs = tf.tile(init_log_probs, [batch_size, 1])
     init_scores = tf.zeros_like(init_log_probs)
     # [batch, beam, 1], begin-of-sequence
-    init_seq = tf.fill([batch_size, beam_size, 1], params.tgt_vocab.pad())
+    init_seq = tf.fill([batch_size, beam_size, num_paral_tokens], params.tgt_vocab.pad())
     init_finish_seq = tf.zeros_like(init_seq)
     # [batch, beam]
     init_finish_scores = tf.fill([batch_size, beam_size], tfdtype.min)
@@ -63,7 +64,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             state
         )
         _, step_state = decoding_fn(
-            flat_prev_seqs[:, -1:], flat_prev_state, 0)
+            flat_prev_seqs[:, -num_paral_tokens:], flat_prev_state, 0)
 
         new_state = nest.map_structure(
             lambda x: util.unmerge_neighbor_dims(x, batch_size, axis=0),
@@ -127,7 +128,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
         # curr_logits: [batch * beam, vocab_size]
         if params.search_mode == "cache":
-            decode_target = flat_prev_seqs[:, -1:]
+            decode_target = flat_prev_seqs[:, -num_paral_tokens:]
         else:
             # introducing `dev` mode into search function
             # this mainly is for model developing, because when developing new models
@@ -137,7 +138,8 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             #  source sentence and partial target sentence at the cost of slower decoding.
             # Definitely disabled if you want higher decoding efficiency.
             decode_target = tf.pad(
-                flat_prev_seqs[:, 1:], [[0, 0], [0, 1]], constant_values=1)
+                flat_prev_seqs[:, num_paral_tokens:], [[0, 0], [0, num_paral_tokens]], constant_values=1)
+        # Step_Logits: [batch * beam, num_paral_tokens, vocab_size]
         step_logits, step_state = decoding_fn(
             decode_target, flat_prev_state, time)
         # add gumbel noise into the logits, simulate gumbel top-k sampling without replacement
@@ -162,70 +164,163 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             step_state
         )
 
-        # 2. compute top-k scored next predictions
-        # reducing beam * vocab_size to 2 * beam
-        # [batch, beam, 1] + [batch, beam, vocab_size]
-        curr_log_probs = tf.expand_dims(prev_log_probs, 2) + step_log_probs
-        length_penality = tf.pow((5.0 + tf.cast(time + 1, tfdtype)) / 6., alpha)
-        curr_scores = curr_log_probs / length_penality
+        # We adopt an approximated decoding algorithm, only considering top-sqrt(V) predictions in each step
+        # Our primary testing suggests that setting sqrt_V to beam_size is big enough
+        if beam_size > 1:
+            sqrt_V = beam_size
 
-        # [batch, beam * vocab_size]
-        curr_flat_scores = util.merge_neighbor_dims(curr_scores, axis=1)
-        # [batch, 2 * beam]
-        topk_scores, topk_indices = tf.nn.top_k(
-            curr_flat_scores, 2 * beam_size)
+            # [batch, beam, num_paral_tokens, sqrt_V]
+            total_step_log_probs, total_step_log_indices = tf.nn.top_k(step_log_probs, sqrt_V)
 
-        # index manipulation, [batch, 2 * beam]
-        curr_beam_indices = topk_indices // vocab_size
-        curr_symbol_indices = topk_indices % vocab_size
-        beam2_pos = util.batch_coordinates(batch_size, 2 * beam_size)
-        curr_coordinates = tf.stack([beam2_pos, curr_beam_indices], axis=2)
+            # collect top-K predictions with their id indices
+            step_log_indices = []
+            sub_step_log_prob = tf.expand_dims(total_step_log_probs[:, :, 0], -1) + \
+                                tf.expand_dims(total_step_log_probs[:, :, 1], -2)
+            sub_step_log_prob = tf.reshape(sub_step_log_prob, [batch_size, beam_size, sqrt_V * sqrt_V])
 
-        # extract candidate sequences
-        # [batch, 2 * beam, time + 1]
-        curr_seq = tf.gather_nd(prev_seq, curr_coordinates)
-        curr_seq = tf.concat([curr_seq,
-                              tf.expand_dims(curr_symbol_indices, 2)], 2)
+            for npt_idx in range(2, num_paral_tokens):
+                step_log_prob, step_log_index = tf.nn.top_k(sub_step_log_prob, sqrt_V)
+                step_log_prob = tf.expand_dims(step_log_prob, -1) + tf.expand_dims(total_step_log_probs[:, :, npt_idx], -2)
+                sub_step_log_prob = tf.reshape(step_log_prob, [batch_size, beam_size, sqrt_V * sqrt_V])
 
-        # 3. handling alive sequences
-        # reducing 2 * beam to beam
-        curr_fin_flags = tf.logical_or(
-            tf.equal(curr_symbol_indices, eos_id),
-            # if time step exceeds the maximum decoding length, should stop
-            tf.expand_dims(
-                tf.greater_equal(time, tf.cast(max_target_length, tf.int32)), 1)
-        )
-        alive_scores = topk_scores + tf.cast(curr_fin_flags, tfdtype) * tfdtype.min
-        # [batch, 2 * beam] -> [batch, beam]
-        alive_scores, alive_indices = tf.nn.top_k(alive_scores, beam_size)
-        beam_pos = util.batch_coordinates(batch_size, beam_size)
-        alive_coordinates = tf.stack([beam_pos, alive_indices], axis=2)
-        alive_seq = tf.gather_nd(curr_seq, alive_coordinates)
-        alive_beam_indices = tf.gather_nd(curr_beam_indices, alive_coordinates)
-        beam_coordinates = tf.stack([beam_pos, alive_beam_indices], axis=2)
-        alive_state = nest.map_structure(
-            lambda x: tf.gather_nd(x, beam_coordinates),
-            step_state
-        )
-        alive_log_probs = alive_scores * length_penality
+                step_log_indices.append(step_log_index)
 
-        # 4. handle finished sequences
-        # reducing 3 * beam to beam
-        prev_fin_seq, prev_fin_scores, prev_fin_flags = bsstate.finish
-        # [batch, 2 * beam]
-        curr_fin_scores = topk_scores + (1.0 - tf.cast(curr_fin_flags, tfdtype)) * tfdtype.min
-        # [batch, 3 * beam]
-        fin_flags = tf.concat([prev_fin_flags, curr_fin_flags], axis=1)
-        fin_scores = tf.concat([prev_fin_scores, curr_fin_scores], axis=1)
-        # [batch, beam]
-        fin_scores, fin_indices = tf.nn.top_k(fin_scores, beam_size)
-        fin_coordinates = tf.stack([beam_pos, fin_indices], axis=2)
-        fin_flags = tf.gather_nd(fin_flags, fin_coordinates)
-        pad_seq = tf.fill([batch_size, beam_size, 1],
-                          tf.constant(pad_id, tf.int32))
-        prev_fin_seq = tf.concat([prev_fin_seq, pad_seq], axis=2)
-        fin_seq = tf.concat([prev_fin_seq, curr_seq], axis=1)
-        fin_seq = tf.gather_nd(fin_seq, fin_coordinates)
+            step_log_probs = sub_step_log_prob
+
+            # 2. compute top-k scored next predictions
+            # reducing beam * vocab_size to 2 * beam
+            # [batch, beam, 1] + [batch, beam, sqrt_V * sqrt_V]
+            curr_log_probs = tf.expand_dims(prev_log_probs, 2) + step_log_probs
+            length_penality = tf.pow((5.0 + tf.cast(time + num_paral_tokens, tfdtype)) / 6., alpha)
+            curr_scores = curr_log_probs / length_penality
+
+            # [batch, beam * sqrt_V * sqrt_V]
+            curr_flat_scores = util.merge_neighbor_dims(curr_scores, axis=1)
+            # [batch, 2 * beam]
+            topk_scores, topk_indices = tf.nn.top_k(
+                curr_flat_scores, 2 * beam_size)
+
+            # index manipulation, [batch, 2 * beam]
+            curr_beam_indices = topk_indices // (sqrt_V * sqrt_V)
+            curr_symbol_indices = topk_indices % (sqrt_V * sqrt_V)
+            beam2_pos = util.batch_coordinates(batch_size, 2 * beam_size)
+            curr_coordinates = tf.stack([beam2_pos, curr_beam_indices], axis=2)
+
+            # [batch, beam, sqrt_V] => [batch, 2 * beam, sqrt_V]
+            word_indices = [tf.gather_nd(v, curr_coordinates) for v in step_log_indices]
+            word_indices_ths = tf.gather_nd(total_step_log_indices, curr_coordinates)
+
+            beam2_range = util.expand_tile_dims(tf.range(2 * beam_size, dtype=tf.int32), batch_size, axis=0)
+
+            # [batch, 2 * beam]
+            step_symbol_indices = curr_symbol_indices
+            step_predict_words = []
+            for npt_idx in range(1, num_paral_tokens-1):
+                step_symbol_indices_A = step_symbol_indices // sqrt_V
+                step_symbol_indices_B = step_symbol_indices % sqrt_V
+
+                bbw_corrdinates = tf.stack([beam2_pos, beam2_range, step_symbol_indices_A], axis=2)
+                step_symbol_indices = tf.gather_nd(word_indices[-npt_idx], bbw_corrdinates)
+                bbw_corrdinates_th = tf.stack([beam2_pos, beam2_range, step_symbol_indices_B], axis=2)
+                npt_idx_word = tf.gather_nd(word_indices_ths[:, :, -npt_idx], bbw_corrdinates_th)
+
+                step_predict_words.append(npt_idx_word)
+
+            # [batch, 2 * beam]
+            step_symbol_indices_A = step_symbol_indices // sqrt_V
+            step_symbol_indices_B = step_symbol_indices % sqrt_V
+            # [batch, 2 * beam]
+            bbw_corrdinates_1th = tf.stack([beam2_pos, beam2_range, step_symbol_indices_A], axis=2)
+            word_1th = tf.gather_nd(word_indices_ths[:, :, 0], bbw_corrdinates_1th)
+            bbw_corrdinates_2th = tf.stack([beam2_pos, beam2_range, step_symbol_indices_B], axis=2)
+            word_2th = tf.gather_nd(word_indices_ths[:, :, 1], bbw_corrdinates_2th)
+
+            step_predict_words.extend([word_2th, word_1th])
+            step_predict_words = tf.stack(step_predict_words[::-1], axis=2)
+
+            # extract candidate sequences
+            # [batch, 2 * beam, time + 1]
+            curr_seq = tf.gather_nd(prev_seq, curr_coordinates)
+            curr_seq = tf.concat([curr_seq, step_predict_words], 2)
+
+            # 3. handling alive sequences
+            # reducing 2 * beam to beam
+            curr_fin_flags = tf.logical_or(
+                tf.reduce_any(tf.equal(step_predict_words, eos_id), axis=-1),
+                # if time step exceeds the maximum decoding length, should stop
+                tf.expand_dims(
+                    tf.greater_equal(time, tf.cast(max_target_length, tf.int32)), 1)
+            )
+            alive_scores = topk_scores + tf.cast(curr_fin_flags, tfdtype) * tfdtype.min
+            # [batch, 2 * beam] -> [batch, beam]
+            alive_scores, alive_indices = tf.nn.top_k(alive_scores, beam_size)
+            beam_pos = util.batch_coordinates(batch_size, beam_size)
+            alive_coordinates = tf.stack([beam_pos, alive_indices], axis=2)
+            alive_seq = tf.gather_nd(curr_seq, alive_coordinates)
+            alive_beam_indices = tf.gather_nd(curr_beam_indices, alive_coordinates)
+            beam_coordinates = tf.stack([beam_pos, alive_beam_indices], axis=2)
+            alive_state = nest.map_structure(
+                lambda x: tf.gather_nd(x, beam_coordinates),
+                step_state
+            )
+            alive_log_probs = alive_scores * length_penality
+
+            # 4. handle finished sequences
+            # reducing 3 * beam to beam
+            prev_fin_seq, prev_fin_scores, prev_fin_flags = bsstate.finish
+            # [batch, 2 * beam]
+            curr_fin_scores = topk_scores + (1.0 - tf.cast(curr_fin_flags, tfdtype)) * tfdtype.min
+            # [batch, 3 * beam]
+            fin_flags = tf.concat([prev_fin_flags, curr_fin_flags], axis=1)
+            fin_scores = tf.concat([prev_fin_scores, curr_fin_scores], axis=1)
+            # [batch, beam]
+            fin_scores, fin_indices = tf.nn.top_k(fin_scores, beam_size)
+            fin_coordinates = tf.stack([beam_pos, fin_indices], axis=2)
+            fin_flags = tf.gather_nd(fin_flags, fin_coordinates)
+            pad_seq = tf.fill([batch_size, beam_size, num_paral_tokens],
+                              tf.constant(pad_id, tf.int32))
+            prev_fin_seq = tf.concat([prev_fin_seq, pad_seq], axis=2)
+            fin_seq = tf.concat([prev_fin_seq, curr_seq], axis=1)
+            fin_seq = tf.gather_nd(fin_seq, fin_coordinates)
+
+        else:
+            # [batch, beam, num_paral_tokens] ::: [batch, 1, num_paral_tokens]
+            step_log_probs, step_log_indices = tf.nn.top_k(step_log_probs, 1)
+            step_log_probs = tf.squeeze(step_log_probs, -1)
+            step_log_indices = tf.squeeze(step_log_indices, -1)
+
+            step_log_probs = tf.reduce_sum(step_log_probs, -1)
+
+            curr_log_probs = prev_log_probs + step_log_probs
+            length_penality = tf.pow((5.0 + tf.cast(time + num_paral_tokens, tfdtype)) / 6., alpha)
+            curr_scores = curr_log_probs / length_penality
+
+            curr_seq = tf.concat([prev_seq, step_log_indices], 2)
+            words = step_log_indices
+
+            # 3. handling alive sequences
+            # reducing 2 * beam to beam
+            curr_fin_flags = tf.logical_or(
+                tf.reduce_any(tf.equal(words, eos_id), axis=-1),
+                # if time step exceeds the maximum decoding length, should stop
+                tf.expand_dims(
+                    tf.greater_equal(time, tf.cast(max_target_length, tf.int32)), 1)
+            )
+
+            alive_scores = curr_scores + tf.cast(curr_fin_flags, tfdtype) * tfdtype.min
+            alive_log_probs = alive_scores * length_penality
+
+            # 4. handle finished sequences
+            # reducing 3 * beam to beam
+            prev_fin_seq, prev_fin_scores, prev_fin_flags = bsstate.finish
+            # [batch, 2 * beam]
+            curr_fin_scores = curr_scores + (1.0 - tf.cast(curr_fin_flags, tfdtype)) * tfdtype.min
+            # [batch, 3 * beam]
+            fin_flags = tf.logical_or(prev_fin_flags, curr_fin_flags)
+            fin_scores = tf.maximum(prev_fin_scores, curr_fin_scores)
+            fin_seq = curr_seq
+            alive_seq = curr_seq
+            alive_state = step_state
 
         next_state = BeamSearchState(
             inputs=(alive_seq, alive_log_probs, alive_scores),
@@ -233,7 +328,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             finish=(fin_seq, fin_scores, fin_flags)
         )
 
-        return time + 1, next_state
+        return time + num_paral_tokens, next_state
 
     time = tf.constant(0, tf.int32, name="time")
     shape_invariants = BeamSearchState(
@@ -270,6 +365,6 @@ def beam_search(features, encoding_fn, decoding_fn, params):
                             init_scores)
 
     return {
-        'seq': final_seqs[:, :, 1:],
+        'seq': final_seqs[:, :, num_paral_tokens:],
         'score': final_scores
     }

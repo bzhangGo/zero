@@ -8,6 +8,15 @@ import numpy as np
 from utils.util import batch_indexer, token_indexer
 
 
+def sequence_interleave(tokens):
+    """
+        Interleave words in a sequence from left-to-target and target-to-left, such as
+        A B C D -> A D B C
+        A B C D E -> A E B D C
+    """
+    return [v for tp in zip(tokens, tokens[::-1]) for v in tp][:len(tokens)]
+
+
 class Dataset(object):
     def __init__(self, src_file, tgt_file,
                  src_vocab, tgt_vocab, max_len=100,
@@ -39,9 +48,13 @@ class Dataset(object):
                 if src_line == "" or tgt_line == "":
                     continue
 
+                # this is the only difference compared to normal data loading
+                # adjust the generation order of sequences: interleaved bidirectional generation
+                tgt_tokens = sequence_interleave(tgt_line.strip().split())
+
                 yield (
                     self.src_vocab.to_id(src_line.strip().split()[:self.max_len]),
-                    self.tgt_vocab.to_id(tgt_line.strip().split()[:self.max_len])
+                    self.tgt_vocab.to_id(tgt_tokens[:self.max_len])
                 )
 
     def to_matrix(self, batch):

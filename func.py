@@ -339,17 +339,20 @@ def ffn_layer(x, d, d_o, dropout=None, scope=None):
 
 
 def add_timing_signal(x, min_timescale=1.0, max_timescale=1.0e4,
-                      time=None, name=None):
+                      time=None, name=None, position=None):
     """Transformer Positional Embedding"""
 
     with tf.name_scope(name, default_name="add_timing_signal", values=[x]):
         length = tf.shape(x)[1]
         channels = tf.shape(x)[2]
-        if time is None:
-            position = dtype.tf_to_float(tf.range(length))
+        if position is None:
+            if time is None:
+                position = dtype.tf_to_float(tf.range(length))
+            else:
+                # decoding position embedding
+                position = tf.expand_dims(time, 0)
         else:
-            # decoding position embedding
-            position = tf.expand_dims(time, 0)
+            position = dtype.tf_to_float(position)
         num_timescales = channels // 2
 
         log_timescale_increment = (
@@ -387,6 +390,10 @@ def attention_bias(inputs, mode, inf=None, name=None):
             mask = inputs
             ret = (1.0 - mask) * - inf
             return tf.expand_dims(tf.expand_dims(ret, 1), 1)
+        elif mode == "masking_ibdecoder":
+            mask = inputs
+            ret = (1.0 - mask) * inf
+            return tf.expand_dims(tf.expand_dims(ret, 0), 0)
         elif mode == "aan":
             length = tf.shape(inputs)[1]
             diagonal = tf.eye(length)

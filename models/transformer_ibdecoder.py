@@ -12,11 +12,26 @@ from models import model
 from utils import util, dtype
 
 
-# Implementation of Average Attention Network from:
-# Accelerating Neural Transformer via an Average Attention Network
-# http://aclweb.org/anthology/P18-1166
+def pos_masking_target(length, ibdecoder_factor):
+    """
+        Given sequence length and IBDecoder factor, generate the SA-specific masks and interleaved word positions
+    """
+    num_paral_tokens = ibdecoder_factor * 2
+
+    positions = tf.range(length, dtype=tf.int32) + num_paral_tokens
+    odd_or_even = tf.cast(positions % 2, tf.int32)
+
+    first_factor = tf.cast((positions - odd_or_even - 2 * (ibdecoder_factor - 1)) // 2, tf.int32)
+    second_factor = tf.cast((positions - odd_or_even) // num_paral_tokens, tf.int32)
+
+    final_positions = odd_or_even * first_factor * (- odd_or_even) + (1 - odd_or_even) * first_factor
+
+    mask = tf.expand_dims(second_factor, 1) - tf.expand_dims(second_factor, 0)
+    mask = tf.cast(tf.greater_equal(mask, 0), tf.float32)
+    return final_positions, mask
 
 
+# Nothing is changed in the encoder
 def encoder(source, params):
     mask = dtype.tf_to_float(tf.cast(source, tf.bool))
     hidden_size = params.hidden_size
@@ -80,41 +95,13 @@ def encoder(source, params):
         "encodes": source_encodes,
         "decoder_initializer": {
             "layer_{}".format(l): {
-                # plan aan
-                "aan": dtype.tf_to_float(tf.zeros([x_shp[0], 1, hidden_size])),
+                "k": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
+                "v": dtype.tf_to_float(tf.zeros([x_shp[0], 0, hidden_size])),
             }
             for l in range(params.num_decoder_layer)
         },
         "mask": mask
     }
-
-
-def average_attention_strategy(strategy, x, mask, state, layer, params):
-    strategy = strategy.lower()
-
-    is_training = ('decoder' not in state)
-
-    if strategy == "aan":
-        if is_training:
-            if params.aan_mask:
-                aan_bias = func.attention_bias(mask, "aan")
-                x_fwd = tf.matmul(aan_bias, x)
-            else:
-                aan_bias = tf.cumsum(mask, axis=1)
-                aan_bias = tf.where(tf.less_equal(aan_bias, 0.),
-                                    tf.ones_like(aan_bias), aan_bias)
-                aan_bias = tf.expand_dims(dtype.tf_to_float(aan_bias), 2)
-
-                x_fwd = tf.cumsum(x, axis=1) / aan_bias
-        else:
-            cache = state['decoder']['state']['layer_{}'.format(layer)]
-            x_fwd = (x + cache['aan']) / dtype.tf_to_float(state['time'] + 1)
-            cache['aan'] = x + cache['aan']
-
-        return x_fwd
-
-    else:
-        raise NotImplementedError("Not supported: {}".format(strategy))
 
 
 def decoder(target, state, params):
@@ -137,17 +124,26 @@ def decoder(target, state, params):
     inputs = tf.gather(tgt_emb, target) * (hidden_size ** 0.5)
     inputs = tf.nn.bias_add(inputs, tgt_bias)
 
+    num_paral_tokens = params.ibdecoder_factor * 2
+
     # shift
     if is_training:
-        inputs = tf.pad(inputs, [[0, 0], [1, 0], [0, 0]])
-        inputs = inputs[:, :-1, :]
-        inputs = func.add_timing_signal(inputs)
+        inputs = tf.pad(inputs, [[0, 0], [num_paral_tokens, 0], [0, 0]])
+        inputs = inputs[:, :-num_paral_tokens, :]
+
+        positions, masking = pos_masking_target(tf.shape(inputs)[1], params.ibdecoder_factor)
+        inputs = func.add_timing_signal(inputs, position=positions)
     else:
         inputs = tf.cond(tf.reduce_all(tf.equal(target, params.tgt_vocab.pad())),
                          lambda: tf.zeros_like(inputs),
                          lambda: inputs)
         mask = tf.ones_like(mask)
-        inputs = func.add_timing_signal(inputs, time=dtype.tf_to_float(state['time']))
+
+        positions, masking = pos_masking_target(state['time'] + num_paral_tokens, params.ibdecoder_factor)
+        positions = positions[-num_paral_tokens:]
+        masking = masking[-num_paral_tokens:]
+
+        inputs = func.add_timing_signal(inputs, position=positions)
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
@@ -162,32 +158,23 @@ def decoder(target, state, params):
             else:
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
-                with tf.variable_scope("average_attention"):
-                    x_fwds = []
-                    for strategy in params.strategies:
-                        with tf.variable_scope(strategy):
-                            x_fwd = average_attention_strategy(
-                                strategy, x, mask, state, layer, params)
-                            x_fwds.append(x_fwd)
-                    x_fwd = tf.add_n(x_fwds) / len(x_fwds)
+                with tf.variable_scope("self_attention"):
+                    y = func.dot_attention(
+                        x,
+                        None,
+                        func.attention_bias(masking, "masking_ibdecoder"),
+                        hidden_size,
+                        num_heads=params.num_heads,
+                        dropout=params.attention_dropout,
+                        cache=None if is_training else
+                        state['decoder']['state']['layer_{}'.format(layer)]
+                    )
+                    if not is_training:
+                        # k, v
+                        state['decoder']['state']['layer_{}'.format(layer)] \
+                            .update(y['cache'])
 
-                    # FFN activation
-                    if params.use_ffn:
-                        y = func.ffn_layer(
-                            x_fwd,
-                            params.filter_size,
-                            hidden_size,
-                            dropout=params.relu_dropout,
-                        )
-                    else:
-                        y = x_fwd
-
-                    # Gating layer
-                    z = func.linear(tf.concat([x, y], axis=-1),
-                                    hidden_size * 2, scope="z_project")
-                    i, f = tf.split(z, 2, axis=-1)
-                    y = tf.sigmoid(i) * x + tf.sigmoid(f) * y
-
+                    y = y['output']
                     x = func.residual_fn(x, y, dropout=params.residual_dropout)
                     x = func.layer_norm(x)
 
@@ -204,7 +191,7 @@ def decoder(target, state, params):
                     )
                     if not is_training:
                         # mk, mv
-                        state['decoder']['state']['layer_{}'.format(layer)]\
+                        state['decoder']['state']['layer_{}'.format(layer)] \
                             .update(y['cache'])
 
                     y = y['output']
@@ -223,7 +210,7 @@ def decoder(target, state, params):
                     x = func.layer_norm(x)
     feature = x
     if 'dev_decode' in state:
-        feature = x[:, -1, :]
+        feature = x[:, -num_paral_tokens, :]
 
     embed_name = "tgt_embedding" if params.shared_target_softmax_embedding \
         else "softmax_embedding"
@@ -254,8 +241,13 @@ def decoder(target, state, params):
 
     # these mask tricks mainly used to deal with zero shapes, such as [0, 1]
     loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
-                   lambda: tf.constant(0, dtype=tf.float32),
+                   lambda: tf.constant(0, tf.float32),
                    lambda: loss)
+
+    # reframe logits with multple target tokens in time dimension
+    if not is_training:
+        target_shape = util.shape_list(target)
+        logits = tf.reshape(logits, [target_shape[0], -1, params.tgt_vocab.size()])
 
     return loss, logits, state, per_sample_loss
 
@@ -328,4 +320,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("transformer_aan", train_fn, score_fn, infer_fn)
+model.model_register("transformer_ibdecoder", train_fn, score_fn, infer_fn)

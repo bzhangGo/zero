@@ -7,6 +7,7 @@ from __future__ import print_function
 import time
 import os
 import copy
+import json
 import random
 import socket
 
@@ -112,11 +113,9 @@ global_params = tc.training.HParams(
     # the number of attention heads
     num_heads=8,
 
-    # average attention network
-    # whether use masked version or cumsum version
-    aan_mask=True,
-    # whether use ffn in the model
-    use_ffn=False,
+    # step size for semi-autoregressive decoding (2*ibdecoder_factor tokens produced per step)
+    # for example, setting ibdecoder_factor to 1 indicates that 2 target words are produced per step
+    ibdecoder_factor=1,
 
     # allowed maximum sentence length
     max_len=100,
@@ -131,9 +130,6 @@ global_params = tc.training.HParams(
     eval_batch_size=32,
     # whether shuffle batches during training
     shuffle_batch=True,
-
-    # aan generalization
-    strategies=["aan"],
 
     # whether use multiprocessing deal with data reading, default true
     process_num=1,
@@ -230,12 +226,6 @@ global_params = tc.training.HParams(
     dtype_epsilon=1e-8,
     dtype_inf=1e8,
     loss_scale=1.0,
-
-    # l0drop related parameters
-    l0_norm_reg_scalar=1.0,
-    l0_norm_start_reg_ramp_up=0,
-    l0_norm_end_reg_ramp_up=10000,
-    l0_norm_warm_up=True,
 )
 
 flags = tf.flags
@@ -268,7 +258,10 @@ def load_parameters(params, output_dir):
                         .format(param_name))
         with tf.gfile.Open(param_name, 'r') as reader:
             json_str = reader.readline()
-            params.parse_json(json_str)
+            json_obj = json.loads(json_str)
+            for name, value in json_obj.items():
+                if hasattr(params, name):
+                    params.set_hparam(name, value)
     return params
 
 

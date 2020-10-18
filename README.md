@@ -1,89 +1,145 @@
-# Zero 
-A neural machine translation system implemented by python2 + tensorflow.
+# Fast Interleaved Bidirectional Sequence Generation
 
-## Features
-1. Multi-Process Data Loading/Processing (*Problems Exist*)
-2. Multi-GPU Training/Decoding
-3. Gradient Aggregation 
+This code base implements the interleaved bidirectional decoder (IBDecoder) introduced in our WMT2020 paper.
 
-## Papers
-* [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models](docs/l0drop)
-* [Adaptive Feature Selection for End-to-End Speech Translation, EMNLP2020 Findings](docs/afs_speech_translation)
-* [Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation, ACL2020](docs/multilingual_laln_lalt)
-* [Improving Deep Transformer with Depth-Scaled Initialization and Merged Attention, EMNLP2019](docs/depth_scale_init_and_merged_attention)
+We integrate bidirectional generation and semi-autoregressive decoder, achieving comparable translation performance on 
+various sequence-to-sequence tasks (machine translation and document summarization) with a decoding speedup of ~2x (very
+marginal training time loss). By 
+allowing the decoder to produce multiple target tokens per step (>2), our model achieves speedups to 4x~11x across 
+different tasks at the cost of <1 BLEU or <0.5ROUGE (on average).
 
-## Supported Models
-* RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
-models.
-* CAEncoder: the context-aware recurrent encoder, see [the paper, TASLP](https://ieeexplore.ieee.org/document/8031316)
-    and the original [source code](https://github.com/DeepLearnXMU/CAEncoder-NMT) (in Theano).
-* Transformer: [attention is all you need](https://arxiv.org/abs/1706.03762)
-* AAN: the [average attention model, ACL2018](https://github.com/bzhangGo/transformer-aan) that accelerates the decoding!
-* Fixup: [Fixup Initialization: Residual Learning Without Normalization](https://arxiv.org/abs/1901.09321)
-* Relative position representation: [Self-Attention with Relative Position Representations](https://arxiv.org/abs/1803.02155)
 
-## Requirements
-* python2.7
-* tensorflow <= 1.13.2
+The [usage](https://github.com/bzhangGo/zero/tree/master/docs/usage) of this codebase is consistent with the master 
+version of [zero](https://github.com/bzhangGo/zero), without any
+specific requirement on data preprocessing. Below offers an example for training on WMT14 EnDe (more information about
+the basic usage is given [here](https://github.com/bzhangGo/zero/tree/master/docs/usage)):
 
-## Usage
-[How to use this toolkit for machine translation?](docs/usage)
+* Training example script
+  ```
+    #!/bin/bash
+    #!
+    
+    data=path-to-preprocessed-datadir/wmt14-ende/
+    
+    python zero/run.py --mode train --parameters=hidden_size=512,embed_size=512,filter_size=2048,\
+    dropout=0.1,label_smooth=0.1,attention_dropout=0.1,\
+    max_len=256,batch_size=80,eval_batch_size=32,\
+    token_size=5000,batch_or_token='token',\
+    initializer="uniform_unit_scaling",initializer_gain=1.,\
+    model_name="transformer_ibdecoder",scope_name="transformer",buffer_size=600000,\
+    ibdecoder_factor=1,\
+    clip_grad_norm=0.0,\
+    num_heads=8,\
+    lrate=1.0,\
+    process_num=3,\
+    estop_patience=100,\
+    num_encoder_layer=6,\
+    num_decoder_layer=6,\
+    warmup_steps=4000,\
+    lrate_strategy="noam",\
+    epoches=5000,\
+    update_cycle=5,\
+    gpus=[0],\
+    disp_freq=1,\
+    eval_freq=5000,\
+    sample_freq=1000,\
+    checkpoints=5,\
+    max_training_steps=300000,\
+    nthreads=8,\
+    beta1=0.9,\
+    beta2=0.98,\
+    epsilon=1e-8,\
+    swap_memory=True,\
+    layer_norm=True,\
+    random_seed=1234,\
+    src_vocab_file="$data/vocab.zero.en",\
+    tgt_vocab_file="$data/vocab.zero.de",\
+    src_train_file="$data/train.32k.en.shuf",\
+    tgt_train_file="$data/train.32k.de.shuf",\
+    src_dev_file="$data/dev.32k.en",\
+    tgt_dev_file="$data/dev.32k.de",\
+    src_test_file="$data/newstest2014.32k.en",\
+    tgt_test_file="$data/newstest2014.de",\
+    output_dir="train",\
+    test_output="trans.txt",\
+    default_dtype="float32",\
+    dtype_epsilon=1e-8,\
+    dtype_inf=1e8,\
+    loss_scale=1.0,\  
+  ```
+* Decoding example script (average the last 5 checkpoints into avg directory)
+  ```
+    #!/bin/bash
+    #!
+    
+    data=path-to-preprocessed-datadir/wmt14-ende/
+    
+    python zero/run.py --mode test --parameters=hidden_size=512,embed_size=512,filter_size=2048,\
+    dropout=0.1,label_smooth=0.1,attention_dropout=0.1,\
+    max_len=256,batch_size=80,eval_batch_size=32,\
+    token_size=5000,batch_or_token='token',\
+    initializer="uniform_unit_scaling",initializer_gain=1.,\
+    model_name="transformer_ibdecoder",scope_name="transformer",buffer_size=600000,\
+    ibdecoder_factor=1,\
+    clip_grad_norm=0.0,\
+    num_heads=8,\
+    lrate=1.0,\
+    process_num=3,\
+    estop_patience=100,\
+    num_encoder_layer=6,\
+    num_decoder_layer=6,\
+    warmup_steps=4000,\
+    lrate_strategy="noam",\
+    epoches=5000,\
+    update_cycle=5,\
+    gpus=[0],\
+    disp_freq=1,\
+    eval_freq=5000,\
+    sample_freq=1000,\
+    checkpoints=5,\
+    max_training_steps=300000,\
+    nthreads=8,\
+    beta1=0.9,\
+    beta2=0.98,\
+    epsilon=1e-8,\
+    swap_memory=True,\
+    layer_norm=True,\
+    random_seed=1234,\
+    src_vocab_file="$data/vocab.zero.en",\
+    tgt_vocab_file="$data/vocab.zero.de",\
+    src_train_file="$data/train.32k.en.shuf",\
+    tgt_train_file="$data/train.32k.de.shuf",\
+    src_dev_file="$data/dev.32k.en",\
+    tgt_dev_file="$data/dev.32k.de",\
+    src_test_file="$data/newstest2014.32k.en",\
+    tgt_test_file="$data/newstest2014.de",\
+    output_dir="avg",\
+    test_output="trans.txt",\
+    default_dtype="float32",\
+    dtype_epsilon=1e-8,\
+    dtype_inf=1e8,\
+    loss_scale=1.0,\  
+  ```
+Two important hyperparameters: `model_name="transformer_ibdecoder"` and `ibdecoder_factor=1`. The `ibdecoder_factor` 
+relates with the number of target tokens produced per decoding step. More concretely, each step generates 
+`2 * ibdecoder_factor` tokens, where the factor `2` comes from the bidirectional generation.
 
-## TODO:
-1. organize the parameters and interpretations in config.
-2. reformat and fulfill code comments
-3. simplify and remove unecessary coding
-4. improve rnn models 
 
-## Citation
 
-If you use the source code, please consider citing the follow paper:
-```
-@InProceedings{D18-1459,
-  author = 	"Zhang, Biao
-		and Xiong, Deyi
-		and su, jinsong
-		and Lin, Qian
-		and Zhang, Huiji",
-  title = 	"Simplifying Neural Machine Translation with Addition-Subtraction Twin-Gated Recurrent Networks",
-  booktitle = 	"Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing",
-  year = 	"2018",
-  publisher = 	"Association for Computational Linguistics",
-  pages = 	"4273--4283",
-  location = 	"Brussels, Belgium",
-  url = 	"http://aclweb.org/anthology/D18-1459"
-}
-```
+Sequence-to-sequence (seq2seq) models, Transformer in particular, still suffer from slow decoding due to the autoregressive decoding
+constraint. Researchers thus attempt to relax this constraint by resorting to semi-to-non autoregressive modeling,
+often gaining translation speedup but at the cost of model performance.
 
-If you are interested in the CAEncoder model, please consider citing our TASLP paper:
-```
-@article{Zhang:2017:CRE:3180104.3180106,
- author = {Zhang, Biao and Xiong, Deyi and Su, Jinsong and Duan, Hong},
- title = {A Context-Aware Recurrent Encoder for Neural Machine Translation},
- journal = {IEEE/ACM Trans. Audio, Speech and Lang. Proc.},
- issue_date = {December 2017},
- volume = {25},
- number = {12},
- month = dec,
- year = {2017},
- issn = {2329-9290},
- pages = {2424--2432},
- numpages = {9},
- url = {https://doi.org/10.1109/TASLP.2017.2751420},
- doi = {10.1109/TASLP.2017.2751420},
- acmid = {3180106},
- publisher = {IEEE Press},
- address = {Piscataway, NJ, USA},
-}
-```
+We follow this direction: trying to produce multiple target tokens per decoding step, with a specific focus on the 
+semi-autoregressive (SA) modeling. One drawback of the vanilla SA model is that it imposes independence assumption on  
+neighbouring target tokens, ignoring the fact that neighbouring words are often strongly correlated. By contrast,
+we explore bidirectional generation from the left-to-right and the right-to-left simultaneously, and show evidence that 
+the independence assumptions in our model are more felicitous.
 
-## Reference
-When developing this repository, I referred to the following projects:
+We propose interleaved bidirectional decoder (IBDecoder), that interleaves target words from the left-to-right and 
+right-to-left directions and separate their positions to support reusing any standard unidirectional decoders. 
+Our experiments on several seq
 
-* [Nematus](https://github.com/EdinburghNLP/nematus)
-* [THUMT](https://github.com/thumt/THUMT)
-* [Tensor2Tensor](https://github.com/tensorflow/tensor2tensor)
-* [Keras](https://github.com/keras-team/keras)
 
 ## Contact
 For any questions or suggestions, please feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)
