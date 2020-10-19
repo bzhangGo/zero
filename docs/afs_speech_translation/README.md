@@ -1,6 +1,6 @@
 ## Adaptive Feature Selection for End-to-End Speech Translation, EMNLP2020 Findings
 
-- [paper link](https://www.aclweb.org/anthology/D19-1083/)
+- [paper link](https://arxiv.org/abs/2010.08518)
 - source code is given in the [speech_translation branch](https://github.com/bzhangGo/zero/tree/speech_translation)
 
 This paper targets at improving end-to-end speech translation by improving the quality of speech features through
