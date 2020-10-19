@@ -10,7 +10,7 @@ input, which is often of higher diversity across different speakers, in terms of
 How to reduce such noises and extract more transcript-relevant speech signals/features is 
 a long-standing challenge for speech translation.
 
-We propose `adaptive feature selection` that adopts [L0Drop](https://arxiv.org/abs/2004.11854)
+We propose [`adaptive feature selection`](https://arxiv.org/abs/2010.08518) that adopts [L0Drop](https://arxiv.org/abs/2004.11854)
 to automatically filter out speech features contributing little to speech recognition. Results
 on several benchmarks, including diverse language pairs, show that our method achieves substantial
 performance improvement compared to the vanilla pretrained baselines with only ~15% retrained 
