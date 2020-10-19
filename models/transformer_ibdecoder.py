@@ -128,9 +128,11 @@ def decoder(target, state, params):
 
     # shift
     if is_training:
+        # IBDecoder: add `num_paral_tokens` paddings
         inputs = tf.pad(inputs, [[0, 0], [num_paral_tokens, 0], [0, 0]])
         inputs = inputs[:, :-num_paral_tokens, :]
 
+        # IBDecoder: adjust semi-autoregressive masking and position encoding
         positions, masking = pos_masking_target(tf.shape(inputs)[1], params.ibdecoder_factor)
         inputs = func.add_timing_signal(inputs, position=positions)
     else:
@@ -139,6 +141,7 @@ def decoder(target, state, params):
                          lambda: inputs)
         mask = tf.ones_like(mask)
 
+        # IBDecoder: dynamically adjust the positional encoding based on decoding step `state['time']`
         positions, masking = pos_masking_target(state['time'] + num_paral_tokens, params.ibdecoder_factor)
         positions = positions[-num_paral_tokens:]
         masking = masking[-num_paral_tokens:]
@@ -162,7 +165,7 @@ def decoder(target, state, params):
                     y = func.dot_attention(
                         x,
                         None,
-                        func.attention_bias(masking, "masking_ibdecoder"),
+                        func.attention_bias(masking, "masking_ibdecoder"),  # IBDecoder: semi-autoregressive self-attention mask
                         hidden_size,
                         num_heads=params.num_heads,
                         dropout=params.attention_dropout,
@@ -244,7 +247,7 @@ def decoder(target, state, params):
                    lambda: tf.constant(0, tf.float32),
                    lambda: loss)
 
-    # reframe logits with multple target tokens in time dimension
+    # IBDecoder: reframe logits with multple target tokens in time dimension, [batch_size, token_number, vocab_size]
     if not is_training:
         target_shape = util.shape_list(target)
         logits = tf.reshape(logits, [target_shape[0], -1, params.tgt_vocab.size()])

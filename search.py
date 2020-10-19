@@ -47,7 +47,8 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     init_log_probs = tf.constant([[0.] + [tfdtype.min] * (beam_size - 1)], dtype=tfdtype)
     init_log_probs = tf.tile(init_log_probs, [batch_size, 1])
     init_scores = tf.zeros_like(init_log_probs)
-    # [batch, beam, 1], begin-of-sequence
+    # begin-of-sequence
+    # IBDecoder: [batch, beam, 1] -> [batch, beam, num_paral_tokens]
     init_seq = tf.fill([batch_size, beam_size, num_paral_tokens], params.tgt_vocab.pad())
     init_finish_seq = tf.zeros_like(init_seq)
     # [batch, beam]
@@ -63,6 +64,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             lambda x: util.merge_neighbor_dims(x, axis=0),
             state
         )
+        # IBDecoder: 1 -> num_paral_tokens
         _, step_state = decoding_fn(
             flat_prev_seqs[:, -num_paral_tokens:], flat_prev_state, 0)
 
@@ -128,6 +130,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
 
         # curr_logits: [batch * beam, vocab_size]
         if params.search_mode == "cache":
+            # IBDecoder: 1 -> num_paral_tokens
             decode_target = flat_prev_seqs[:, -num_paral_tokens:]
         else:
             # introducing `dev` mode into search function
@@ -137,6 +140,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             #  mistakes. To this end, I add the dev mode, that the model only uses
             #  source sentence and partial target sentence at the cost of slower decoding.
             # Definitely disabled if you want higher decoding efficiency.
+            # IBDecoder: 1 -> num_paral_tokens
             decode_target = tf.pad(
                 flat_prev_seqs[:, num_paral_tokens:], [[0, 0], [0, num_paral_tokens]], constant_values=1)
         # Step_Logits: [batch * beam, num_paral_tokens, vocab_size]
@@ -169,9 +173,12 @@ def beam_search(features, encoding_fn, decoding_fn, params):
         if beam_size > 1:
             sqrt_V = beam_size
 
+            ##### IBDecoder,
+            # step 1: get top sqrt_V (beam_size) predictions
             # [batch, beam, num_paral_tokens, sqrt_V]
             total_step_log_probs, total_step_log_indices = tf.nn.top_k(step_log_probs, sqrt_V)
 
+            # step 2: recurrently perform outer vector addition, avoiding memory issues
             # collect top-K predictions with their id indices
             step_log_indices = []
             sub_step_log_prob = tf.expand_dims(total_step_log_probs[:, :, 0], -1) + \
@@ -186,11 +193,13 @@ def beam_search(features, encoding_fn, decoding_fn, params):
                 step_log_indices.append(step_log_index)
 
             step_log_probs = sub_step_log_prob
+            ##### IBDecoder
 
             # 2. compute top-k scored next predictions
             # reducing beam * vocab_size to 2 * beam
             # [batch, beam, 1] + [batch, beam, sqrt_V * sqrt_V]
             curr_log_probs = tf.expand_dims(prev_log_probs, 2) + step_log_probs
+            # IBDecoder: 1 -> num_paral_tokens
             length_penality = tf.pow((5.0 + tf.cast(time + num_paral_tokens, tfdtype)) / 6., alpha)
             curr_scores = curr_log_probs / length_penality
 
@@ -206,12 +215,14 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             beam2_pos = util.batch_coordinates(batch_size, 2 * beam_size)
             curr_coordinates = tf.stack([beam2_pos, curr_beam_indices], axis=2)
 
+            # IBDecoder: based on the coordination of selected beams, extract corresponding word indices
             # [batch, beam, sqrt_V] => [batch, 2 * beam, sqrt_V]
             word_indices = [tf.gather_nd(v, curr_coordinates) for v in step_log_indices]
             word_indices_ths = tf.gather_nd(total_step_log_indices, curr_coordinates)
 
             beam2_range = util.expand_tile_dims(tf.range(2 * beam_size, dtype=tf.int32), batch_size, axis=0)
 
+            # IBDecoder: backward tracing, collect predicted words and indices
             # [batch, 2 * beam]
             step_symbol_indices = curr_symbol_indices
             step_predict_words = []
@@ -235,6 +246,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             bbw_corrdinates_2th = tf.stack([beam2_pos, beam2_range, step_symbol_indices_B], axis=2)
             word_2th = tf.gather_nd(word_indices_ths[:, :, 1], bbw_corrdinates_2th)
 
+            # IBDecoder: the final top-beam size word prediction
             step_predict_words.extend([word_2th, word_1th])
             step_predict_words = tf.stack(step_predict_words[::-1], axis=2)
 
@@ -246,6 +258,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             # 3. handling alive sequences
             # reducing 2 * beam to beam
             curr_fin_flags = tf.logical_or(
+                # IBDecoder: among any predicted words, reach the end of this beam if any of them is eos
                 tf.reduce_any(tf.equal(step_predict_words, eos_id), axis=-1),
                 # if time step exceeds the maximum decoding length, should stop
                 tf.expand_dims(
@@ -284,6 +297,8 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             fin_seq = tf.gather_nd(fin_seq, fin_coordinates)
 
         else:
+            # IBDecoder: specific solution for greedy decoding, in this case, no worries about top-k handling
+            # top-beam size is the final prediction, directly
             # [batch, beam, num_paral_tokens] ::: [batch, 1, num_paral_tokens]
             step_log_probs, step_log_indices = tf.nn.top_k(step_log_probs, 1)
             step_log_probs = tf.squeeze(step_log_probs, -1)
@@ -328,6 +343,8 @@ def beam_search(features, encoding_fn, decoding_fn, params):
             finish=(fin_seq, fin_scores, fin_flags)
         )
 
+        # IBDecoder: 1->num_paral_tokens
+        # each decoding step produces `num_paral_tokens` tokens, note time denotes the number of tokens produced so far
         return time + num_paral_tokens, next_state
 
     time = tf.constant(0, tf.int32, name="time")
@@ -364,6 +381,7 @@ def beam_search(features, encoding_fn, decoding_fn, params):
     final_scores = tf.where(tf.reduce_any(final_flags, 1), final_scores,
                             init_scores)
 
+    # IBDecoder: for the final prediction, skip the first-num_paral_tokens paddings
     return {
         'seq': final_seqs[:, :, num_paral_tokens:],
         'score': final_scores

@@ -48,8 +48,9 @@ class Dataset(object):
                 if src_line == "" or tgt_line == "":
                     continue
 
-                # this is the only difference compared to normal data loading
+                # IBDecoder: this is the only difference compared to normal data loading
                 # adjust the generation order of sequences: interleaved bidirectional generation
+                # the original source code: tgt_tokens = tgt_line.strip().split()
                 tgt_tokens = sequence_interleave(tgt_line.strip().split())
 
                 yield (
