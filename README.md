@@ -11,7 +11,7 @@ different tasks at the cost of <1 BLEU or <0.5ROUGE (on average).
 
 The [usage](https://github.com/bzhangGo/zero/tree/master/docs/usage) of this codebase is consistent with the master 
 version of [zero](https://github.com/bzhangGo/zero), without any
-specific requirement on data preprocessing. Below offers an example for training on WMT14 EnDe (more information about
+specific requirement for data preprocessing. Below offers an example for training on WMT14 EnDe (more information about
 the basic usage is given [here](https://github.com/bzhangGo/zero/tree/master/docs/usage)):
 
 * Training example script
@@ -124,22 +124,6 @@ Two important hyperparameters: `model_name="transformer_ibdecoder"` and `ibdecod
 relates with the number of target tokens produced per decoding step. More concretely, each step generates 
 `2 * ibdecoder_factor` tokens, where the factor `2` comes from the bidirectional generation.
 
+* Please go to [here](https://github.com/bzhangGo/zero/blob/master/docs/interleaved_bidirectional_transformer) for more experimental results, including trained models, translations and preprocessed corpus.
 
-
-Sequence-to-sequence (seq2seq) models, Transformer in particular, still suffer from slow decoding due to the autoregressive decoding
-constraint. Researchers thus attempt to relax this constraint by resorting to semi-to-non autoregressive modeling,
-often gaining translation speedup but at the cost of model performance.
-
-We follow this direction: trying to produce multiple target tokens per decoding step, with a specific focus on the 
-semi-autoregressive (SA) modeling. One drawback of the vanilla SA model is that it imposes independence assumption on  
-neighbouring target tokens, ignoring the fact that neighbouring words are often strongly correlated. By contrast,
-we explore bidirectional generation from the left-to-right and the right-to-left simultaneously, and show evidence that 
-the independence assumptions in our model are more felicitous.
-
-We propose interleaved bidirectional decoder (IBDecoder), that interleaves target words from the left-to-right and 
-right-to-left directions and separate their positions to support reusing any standard unidirectional decoders. 
-Our experiments on several seq
-
-
-## Contact
 For any questions or suggestions, please feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)
