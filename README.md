@@ -15,6 +15,7 @@ A neural machine translation system implemented by python2 + tensorflow.
 ## Supported Models
 * RNNSearch: support LSTM, GRU, SRU, [ATR, EMNLP2018](https://github.com/bzhangGo/ATR), and [LRN, ACL2019](https://github.com/bzhangGo/lrn) 
 models.
+* Deep attention: [Neural Machine Translation with Deep Attention, TPAMI](https://ieeexplore.ieee.org/document/8493282)
 * CAEncoder: the context-aware recurrent encoder, see [the paper, TASLP](https://ieeexplore.ieee.org/document/8031316)
     and the original [source code](https://github.com/DeepLearnXMU/CAEncoder-NMT) (in Theano).
 * Transformer: [attention is all you need](https://arxiv.org/abs/1706.03762)
