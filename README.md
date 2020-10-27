@@ -3,9 +3,9 @@
 This code base implements the interleaved bidirectional decoder (IBDecoder) introduced in our WMT2020 paper.
 
 We integrate bidirectional generation and semi-autoregressive decoder, achieving comparable translation performance on 
-various sequence-to-sequence tasks (machine translation and document summarization) with a decoding speedup of ~2x (very
+various sequence-to-sequence tasks (machine translation and document summarization) with a decoding speedup of \~2x (very
 marginal training time loss). By 
-allowing the decoder to produce multiple target tokens per step (>2), our model achieves speedups to 4x~11x across 
+allowing the decoder to produce multiple target tokens per step (>2), our model achieves speedups to 4x\~11x across 
 different tasks at the cost of <1 BLEU or <0.5ROUGE (on average).
 
 
