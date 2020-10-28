@@ -1,6 +1,6 @@
 ## Fast Interleaved Bidirectional Sequence Generation
 
-- [paper link](to appear)
+- [paper link](https://arxiv.org/abs/2010.14481)
 - source code is given in the [interleaved_bidirectional_transformer branch](https://github.com/bzhangGo/zero/tree/interleaved_bidirectional_transformer)
 
 
