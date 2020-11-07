@@ -392,7 +392,7 @@ def attention_bias(inputs, mode, inf=None, name=None):
             return tf.expand_dims(tf.expand_dims(ret, 1), 1)
         elif mode == "masking_ibdecoder":
             mask = inputs
-            ret = (1.0 - mask) * inf
+            ret = (1.0 - mask) * - inf
             return tf.expand_dims(tf.expand_dims(ret, 0), 0)
         elif mode == "aan":
             length = tf.shape(inputs)[1]
