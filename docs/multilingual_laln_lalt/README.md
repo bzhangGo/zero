@@ -69,6 +69,60 @@ rather than the multilingual one.
 
 - The sentencepiece model and vocabulary used in our experiments are given [here](http://data.statmt.org/bzhang/acl2020_multilingual/submodels.tar.gz).
 We also provide an example [evaluation script](http://data.statmt.org/bzhang/acl2020_multilingual/example_evaluation.sh).
+
+#### Going-Through Example
+
+To ease others quickly using the pretrained models and our source code, below we show a simple script. *Note it's used
+to decoding the opus test set with the above pretrained models.*
+
+```
+#! /bin/bash
+
+# below is an example showing how to use our pretrained models to perform evaluation
+
+
+# download the zero-toolkit 
+git clone --branch multilingual_laln_lalt https://github.com/bzhangGo/zero.git
+
+# download opus-100 to opus-100-corpus
+# slow
+# bash zero/scripts/data/download_opus100.sh zero/ opus-100-corpus
+# faster, note this downloading might not be stable, if you cannot download the data, try multiple times or other alternative methods (like the above
+ slow one)
+wget https://object.pouta.csc.fi/OPUS-100/v1.0/opus-100-corpus-v1.0.tar.gz
+tar xfvz opus-100-corpus-v1.0.tar.gz
+
+# adjust document structure (to meet requirement of example_evaluation.sh)
+if [[ ! -d opus-100-corpus ]]; then
+    echo 'please downloading the opus-100-corpus'
+    exit 1
+fi
+
+cd opus-100-corpus/
+ln -s v1.0/* .
+cd ..
+
+# download our preprocessed subword models
+wget http://data.statmt.org/bzhang/acl2020_multilingual/submodels.tar.gz
+tar xfvz submodels.tar.gz
+
+# download Ours-L6-RoBT model for example
+wget http://data.statmt.org/bzhang/acl2020_multilingual/Ours-L6-RoBT.tar.gz 
+tar xfvz Ours-L6-RoBT.tar.gz
+
+# download the evaluation script
+wget http://data.statmt.org/bzhang/acl2020_multilingual/example_evaluation.sh
+
+# install sacrebleu, sentencepiece if necessary
+pip3 install sacrebleu sentencepiece --user
+# notice that we use tensorflow, so install tensorflow if necessary
+# pip install tensorflow_gpu==1.13.1 --user
+
+
+# perform decoding
+bash example_evaluation.sh
+```
+
  
 ### Code
 
