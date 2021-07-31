@@ -396,8 +396,8 @@ def train(params):
                                 params.recorder.estop = True
                                 break
 
-                        params.recorder.history_scores.append((gstep, float(np.mean(scores))))
-                        params.recorder.valid_script_scores.append((gstep, float(bleu)))
+                        params.recorder.history_scores.append((int(gstep), float(np.mean(scores))))
+                        params.recorder.valid_script_scores.append((int(gstep), float(bleu)))
                         params.recorder.save_to_json(os.path.join(params.output_dir, "record.json"))
 
                         # handle the learning rate decay in a typical manner
@@ -427,7 +427,7 @@ def train(params):
                         break
 
                     # should be equal to global_step
-                    params.recorder.step = gstep
+                    params.recorder.step = int(gstep)
 
             if params.recorder.estop:
                 tf.logging.info("Early Stopped!")
