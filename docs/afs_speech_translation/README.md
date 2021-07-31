@@ -1,6 +1,6 @@
 ## Adaptive Feature Selection for End-to-End Speech Translation, EMNLP2020 Findings
 
-- [paper link](https://arxiv.org/abs/2010.08518)
+- [paper link](https://aclanthology.org/2020.findings-emnlp.230/)
 - source code is given in the [speech_translation branch](https://github.com/bzhangGo/zero/tree/speech_translation)
 
 This paper targets at improving end-to-end speech translation by improving the quality of speech features through
@@ -93,15 +93,23 @@ Please go to [AFS for E2E ST](http://data.statmt.org/bzhang/emnlp2020_findings_a
 ### Citation
 
 Please consider cite our paper as follows:
->Biao Zhang; Ivan Titov; Barry Haddow; Rico Sennrich (2020). Adaptive Feature Selection for End-to-End Speech Translation. In Findings of EMNLP. 
+>Biao Zhang; Ivan Titov; Barry Haddow; Rico Sennrich (2020). Adaptive Feature Selection for End-to-End Speech Translation. In Findings of the Association for Computational Linguistics: EMNLP 2020. 
 ```
 @inproceedings{zhang-etal-2020-adaptive,
     title = "Adaptive Feature Selection for End-to-End Speech Translation",
     author = "Zhang, Biao  and
       Titov, Ivan  and
-      Haddow, Barry and
+      Haddow, Barry  and
       Sennrich, Rico",
-    booktitle = "Findings of EMNLP",
+    booktitle = "Findings of the Association for Computational Linguistics: EMNLP 2020",
+    month = nov,
     year = "2020",
+    address = "Online",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2020.findings-emnlp.230",
+    doi = "10.18653/v1/2020.findings-emnlp.230",
+    pages = "2533--2544",
+    abstract = "Information in speech signals is not evenly distributed, making it an additional challenge for end-to-end (E2E) speech translation (ST) to learn to focus on informative features. In this paper, we propose adaptive feature selection (AFS) for encoder-decoder based E2E ST. We first pre-train an ASR encoder and apply AFS to dynamically estimate the importance of each encoded speech feature to ASR. A ST encoder, stacked on top of the ASR encoder, then receives the filtered features from the (frozen) ASR encoder. We take L0DROP (Zhang et al., 2020) as the backbone for AFS, and adapt it to sparsify speech features with respect to both temporal and feature dimensions. Results on LibriSpeech EnFr and MuST-C benchmarks show that AFS facilitates learning of ST by pruning out {\textasciitilde}84{\%} temporal features, yielding an average translation gain of {\textasciitilde}1.3-1.6 BLEU and a decoding speedup of {\textasciitilde}1.4x. In particular, AFS reduces the performance gap compared to the cascade baseline, and outperforms it on LibriSpeech En-Fr with a BLEU score of 18.56 (without data augmentation).",
 }
+
 ```

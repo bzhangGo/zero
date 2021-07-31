@@ -2,7 +2,7 @@
 
 [**Paper**](https://aclanthology.org/2021.findings-acl.255/) | 
 [**Highlights**](#paper-highlights) |
-[**Overview**](#overview) |
+[**Overview**](#l0drop) |
 [**CaseStudy**](#examples) |
 [**Training&Eval**](#training-and-evaluation) |
 [**Citation**](#citation)
