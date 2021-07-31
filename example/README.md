@@ -17,7 +17,7 @@ Untar the dataset.
 ### Step 2. Download this code base
 
 ```
-git clone --branch speech_translation https://github.com/bzhangGo/zero.git
+git clone --branch context_aware_speech_translation https://github.com/bzhangGo/zero.git
 ```
 Suppose the downloaded code path is `zero` so we refer to the code base as `${zero}`
 
@@ -39,6 +39,8 @@ ln -s en-de/data/train/txt/train.de .
 
 # tokenize, true-case and BPE
 # you need download the mosesdecoder and subword-nmt, and re-set the path in the following script 
+# git clone https://github.com/rsennrich/subword-nmt.git
+# git clone https://github.com/moses-smt/mosesdecoder.git 
 ./prepare.sh
 
 # prepare vocabulary
