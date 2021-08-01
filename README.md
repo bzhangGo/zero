@@ -13,6 +13,7 @@ We associate each paper below with a readme file link. Please click the paper li
 * [Edinburgh's End-to-End Multilingual Speech Translation System for IWSLT 2021, IWSLT2021 System submission](docs/iwslt2021_uoe_submission)
 * [Beyond Sentence-Level End-to-End Speech Translation: Context Helps, ACL2021](docs/context_aware_st)
 * [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models, ACL2021 Findings](docs/l0drop)
+* [Share or Not? Learning to Schedule Language-Specific Capacity for Multilingual Translation, ICLR2021](docs/conditional_language_specific_routing)
 * [Fast Interleaved Bidirectional Sequence Generation, WMT2020](docs/interleaved_bidirectional_transformer)
 * [Adaptive Feature Selection for End-to-End Speech Translation, EMNLP2020 Findings](docs/afs_speech_translation)
 * [Improving Massively Multilingual Neural Machine Translation and Zero-Shot Translation, ACL2020](docs/multilingual_laln_lalt)
