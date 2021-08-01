@@ -101,6 +101,8 @@ The source code is based on older version of python and tensorflow.
 
 ## Data Preprocessing
 
+**We offer our preprocessed dataset at [here](http://data.statmt.org/bzhang/iclr2021_share_or_not/)**
+
 This source code is adapted from [zero](https://github.com/bzhangGo/zero), and the preprocessing also follows zero.
 [Here](https://github.com/bzhangGo/zero/tree/master/docs/usage#how-to-use-it) shows an typical example on how to 
 preprocess the WMT14 En-De translation task. 
