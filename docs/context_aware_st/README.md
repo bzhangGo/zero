@@ -2,7 +2,7 @@
 
 [**Paper**](https://aclanthology.org/2021.acl-long.200/) | 
 [**Highlights**](#paper-highlights) |
-[**Overview**](#context_aware_st) |
+[**Overview**](#context-aware-st) |
 [**Results**](#results) |
 [**Training&Eval**](#training-and-evaluation) |
 [**Citation**](#citation)
