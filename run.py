@@ -27,6 +27,25 @@ global_params = tc.training.HParams(
     # whether share target and softmax word embedding
     shared_target_softmax_embedding=True,
 
+    # document related parameters for context-aware st
+    # number of source/target input: 1 means sentence-level
+    #   2 means using one previous input for generation
+    N_src=1,
+    N_tgt=1,
+    # yaml_file is the yaml given in MuST-C, containing document information
+    train_yaml_file="",
+    dev_yaml_file="",
+    test_yaml_file="",
+    # inference mode,
+    # default => sentence-level st
+    # swbd => sliding window-based decoding
+    # swbd_cons => sliding window-based decoding with constraint
+    # cbd => chunk-based decoding
+    # imed => in-model ensemble decoding
+    inference_mode="default",
+    # \lambda for imed
+    sent_prob=0.5,
+
     # decoding maximum length: source length + decode_length
     decode_length=50,
     # beam size

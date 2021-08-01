@@ -5,7 +5,6 @@ from __future__ import division
 from __future__ import print_function
 
 import copy
-import numpy as np
 import tensorflow as tf
 
 import func
@@ -14,66 +13,13 @@ from modules import l0_norm
 from utils import util, dtype
 
 
-def reshape_pyramidal(inputs, scale=2, mask=None):
-    """
-    Reshapes the given outputs, i.e. reduces the
-    time resolution by 2.
-    Similar to "Listen Attend Spell".
-    https://arxiv.org/pdf/1508.01211.pdf
-    """
-    # [batch_size, max_time, num_units]
-    batch_size, max_time, num_units = util.shape_list(inputs)
-
-    if mask is not None:
-        inputs *= tf.expand_dims(mask, -1)
-
-    num_pad = tf.cast(tf.ceil(tf.divide(max_time, scale)) * scale, tf.int32) - max_time
-
-    pads = [[0, 0], [0, num_pad], [0, 0]]
-    inputs = tf.pad(inputs, pads)
-
-    if mask is not None:
-        pads = [[0, 0], [0, num_pad]]
-        mask = tf.pad(mask, pads)
-
-    concat_inputs = tf.reshape(inputs, (batch_size, -1, num_units * scale))
-    if mask is not None:
-        concat_mask = tf.reshape(mask, (batch_size, -1, scale))
-        concat_mask = 1. - tf.to_float(tf.less(tf.reduce_sum(concat_mask, -1), scale))
-
-        return concat_inputs, concat_mask
-    else:
-        return concat_inputs
-
-
 def encoder(source, mask, params):
+
     hidden_size = params.hidden_size
 
-    # transformer going, random noise to make the training robust, this is not the spec-augmentation
-    if params.noise_dropout > 0.:
-        n_source = source + tf.random_normal(tf.shape(source), stddev=1.0 / np.iinfo(np.int16).max)
-        source = tf.cond(tf.random_uniform([]) < params.noise_dropout, lambda: n_source, lambda: source)
-    # tried different settings for scale, turns out 3 is good
-    source, mask = reshape_pyramidal(source, scale=3, mask=mask)
-    inputs = func.linear(source, params.embed_size, scope="emb_mapper")
-    # transformer is sensitive to the position encoding,
-    # parameterized position encoding is more stable than the sinusoid function
-    # by default, we keep the sinusoid encoding function due to its flexibility
-    if params.sinusoid_posenc:
-        inputs = func.add_timing_signal(inputs)
-    else:
-        pos_emb = tf.get_variable("pos_embedding", [params.max_poslen, params.embed_size])
-
-        ishp = util.shape_list(inputs)
-        inputs += tf.expand_dims(pos_emb[:ishp[1]], 0)
-
-    # this normalization layer deeply stabilize the gradient and optimization issue
-    inputs = func.layer_norm(inputs)
-
-    inputs = util.valid_apply_dropout(inputs, params.dropout)
-
-    with tf.variable_scope("encoder"):
-        x = inputs
+    with tf.variable_scope("enc_mt"):
+        x = func.add_timing_signal(source)
+        x = func.layer_norm(x)
         for layer in range(params.num_encoder_layer):
             if params.deep_transformer_init:
                 layer_initializer = tf.variance_scaling_initializer(
@@ -84,17 +30,13 @@ def encoder(source, mask, params):
                 layer_initializer = None
             with tf.variable_scope("layer_{}".format(layer), initializer=layer_initializer):
                 with tf.variable_scope("self_attention"):
-                    # we observe very large impact of the localization in self-attentions on translation quality.
-                    # suggest: encoder_localize-> log, decoder->none
                     y = func.dot_attention(
                         x,
                         None,
                         func.attention_bias(mask, "masking"),
                         hidden_size,
                         num_heads=params.num_heads,
-                        dropout=params.attention_dropout,
-                        localize=params.enc_localize,
-                        max_relative_position=params.max_relative_position,
+                        dropout=params.attention_dropout
                     )
 
                     y = y['output']
@@ -113,7 +55,7 @@ def encoder(source, mask, params):
                     x = func.layer_norm(x)
 
     source_encodes = x
-    x_shp = util.shape_list(x)
+    x_shp = util.shape_list(source)
 
     return {
         "encodes": source_encodes,
@@ -154,58 +96,25 @@ def decoder(target, state, params, labels=None):
         inputs = inputs[:, :-1, :]
         inputs = func.add_timing_signal(inputs)
     else:
-        inputs = tf.cond(tf.reduce_all(tf.equal(target, params.tgt_vocab.pad())),
-                         lambda: tf.zeros_like(inputs),
-                         lambda: inputs)
+        if params.inference_mode != 'swbd_cons' and params.inference_mode != 'imed':
+            inputs = tf.cond(tf.reduce_all(tf.equal(target, params.tgt_vocab.pad())),
+                             lambda: tf.zeros_like(inputs),
+                             lambda: inputs)
+            inputs = func.add_timing_signal(inputs, time=dtype.tf_to_float(state['time']))
+        else:
+            first_position = tf.one_hot(0, util.shape_list(target)[1], dtype=tf.float32)
+            input_mask = tf.cond(tf.equal(state['time'], 0), lambda: 1.0 - first_position,
+                                 lambda: tf.ones_like(first_position))
+            inputs = inputs * tf.expand_dims(input_mask, -1)
+            inputs = func.add_timing_signal(inputs, time=dtype.tf_to_float(state['time']), add_length=True)
         mask = tf.ones_like(mask)
-        inputs = func.add_timing_signal(inputs, time=dtype.tf_to_float(state['time']))
 
     inputs = util.valid_apply_dropout(inputs, params.dropout)
 
     source_memory = state["encodes"]
     source_mask = state["mask"]
 
-    # AFS^t, adaptive feature selection for temporal dimension
-    if params.enable_afs_t:
-        source_pruning = func.linear(source_memory, 1, scope="source_pruning")
-
-        if is_training:  # training
-            source_memory, l0_mask = l0_norm.var_train((source_memory, source_pruning))
-            l0_norm_loss = tf.squeeze(l0_norm.l0_norm(source_pruning), -1)
-            l0_norm_loss = tf.reduce_sum(l0_norm_loss * source_mask, -1) / tf.reduce_sum(source_mask, -1)
-            l0_norm_loss = tf.reduce_mean(l0_norm_loss)
-            l0_norm_loss = l0_norm.l0_regularization_loss(
-                l0_norm_loss,
-                reg_scalar=params.l0_norm_reg_scalar,
-                start_reg_ramp_up=params.l0_norm_start_reg_ramp_up,
-                end_reg_ramp_up=params.l0_norm_end_reg_ramp_up,
-                warm_up=params.l0_norm_warm_up,
-            )
-        else:  # evaluation
-            source_memory, l0_mask = l0_norm.var_eval((source_memory, source_pruning))
-            l0_norm_loss = 0.0
-
-    # AFS^f, adaptive feature selection for feature dimension
-    if params.enable_afs_f:
-        neuron_pruning = tf.get_variable("neuron_pruning", [1, 1, hidden_size], initializer=tf.zeros_initializer())
-
-        # for neuron
-        if is_training:  # training
-            source_memory, neuron_mask = l0_norm.var_train((source_memory, neuron_pruning))
-            neuron_loss = tf.squeeze(l0_norm.l0_norm(neuron_pruning), 1)
-            neuron_loss = tf.reduce_mean(neuron_loss, -1)
-            neuron_loss = tf.reduce_mean(neuron_loss)
-            neuron_loss = l0_norm.l0_regularization_loss(
-                neuron_loss,
-                reg_scalar=params.l0_norm_reg_scalar,
-                start_reg_ramp_up=params.l0_norm_start_reg_ramp_up,
-                end_reg_ramp_up=params.l0_norm_end_reg_ramp_up,
-                warm_up=params.l0_norm_warm_up,
-            )
-        else:  # evaluation
-            source_memory, neuron_mask = l0_norm.var_eval((source_memory, neuron_pruning))
-            neuron_loss = 0.0
-
+    # the ST decoder
     with tf.variable_scope("decoder"):
         x = inputs
         for layer in range(params.num_decoder_layer):
@@ -320,11 +229,6 @@ def decoder(target, state, params, labels=None):
 
         loss = params.ctc_alpha * ctc_loss + (1. - params.ctc_alpha) * loss
 
-    if params.enable_afs_t:
-        loss += l0_norm_loss
-    if params.enable_afs_f:
-        loss += neuron_loss
-
     # these mask tricks mainly used to deal with zero shapes, such as [0, 1]
     loss = tf.cond(tf.equal(tf.shape(target)[0], 0),
                    lambda: tf.constant(0, tf.float32),
@@ -389,8 +293,7 @@ def infer_fn(params):
                                custom_getter=dtype.float32_variable_storage_getter):
             if params.search_mode == "cache":
                 state['time'] = time
-                step_loss, step_logits, step_state, _, _, _ = decoder(
-                    target, state, params)
+                step_loss, step_logits, step_state, _, _, _ = decoder(target, state, params)
                 del state['time']
             else:
                 # not implemented
@@ -405,4 +308,4 @@ def infer_fn(params):
 
 
 # register the model, with a unique name
-model.model_register("transformer_afs", train_fn, score_fn, infer_fn)
+model.model_register("transformer_contextual_st", train_fn, score_fn, infer_fn)

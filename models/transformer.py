@@ -128,7 +128,7 @@ def encoder(source, mask, params):
 
 
 def decoder(target, state, params, labels=None):
-    mask = dtype.tf_to_float(tf.cast(target, tf.bool))
+    mask = dtype.tf_to_float(tf.greater_equal(target, 0))
     hidden_size = params.hidden_size
     initializer = tf.random_normal_initializer(0.0, hidden_size ** -0.5)
 
@@ -280,7 +280,7 @@ def decoder(target, state, params, labels=None):
                    lambda: tf.constant(0, tf.float32),
                    lambda: loss)
 
-    return loss, logits, state, per_sample_loss
+    return loss, logits, state, per_sample_loss, state['encodes'], state['mask']
 
 
 def train_fn(features, params, initializer=None):
@@ -290,8 +290,8 @@ def train_fn(features, params, initializer=None):
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
         state = encoder(features['source'], features['source_mask'], params)
-        loss, logits, state, _ = decoder(features['target'], state, params,
-                                         labels=features['label'] if params.ctc_enable else None)
+        loss, logits, state, _, _, _ = decoder(
+            features['target'], state, params, labels=features['label'] if params.ctc_enable else None)
 
         return {
             "loss": loss
@@ -308,10 +308,12 @@ def score_fn(features, params, initializer=None):
                            dtype=tf.as_dtype(dtype.floatx()),
                            custom_getter=dtype.float32_variable_storage_getter):
         state = encoder(features['source'], params)
-        _, _, _, scores = decoder(features['target'], state, params)
+        _, _, _, scores, memory, mask = decoder(features['target'], state, params)
 
         return {
-            "score": scores
+            "score": scores,
+            "memory": memory,
+            "mask": mask,
         }
 
 
@@ -337,13 +339,13 @@ def infer_fn(params):
                                custom_getter=dtype.float32_variable_storage_getter):
             if params.search_mode == "cache":
                 state['time'] = time
-                step_loss, step_logits, step_state, _ = decoder(
+                step_loss, step_logits, step_state, _, _, _ = decoder(
                     target, state, params)
                 del state['time']
             else:
                 estate = encoder(state, params)
                 estate['dev_decode'] = True
-                _, step_logits, _, _ = decoder(target, estate, params)
+                _, step_logits, _, _, _, _ = decoder(target, estate, params)
                 step_state = state
 
             return step_logits, step_state

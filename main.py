@@ -5,6 +5,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import h5py
 import time
 import copy
 import numpy as np
@@ -15,6 +16,7 @@ import lrs
 from data import Dataset
 from models import model
 from search import beam_search
+from search_imed import beam_search as imed_beam_search
 from utils import parallel, cycle, util, queuer, saver, dtype
 from modules import initializer
 
@@ -50,6 +52,57 @@ def tower_infer_graph(eval_features, graph, params):
     def _tower_infer_graph(features):
         encoding_fn, decoding_fn = graph.infer_fn(params)
         beam_output = beam_search(features, encoding_fn, decoding_fn, params)
+
+        return beam_output
+
+    # feed model to multiple gpus
+    eval_outputs = parallel.parallel_model(
+        _tower_infer_graph, eval_features,
+        params.gpus, use_cpu=(len(params.gpus) == 0))
+    eval_seqs, eval_scores = eval_outputs['seq'], eval_outputs['score']
+
+    return eval_seqs, eval_scores
+
+
+def imed_tower_infer_graph(eval_features, sent_graph, doc_graph, params):
+    if params.inference_mode == "swbd_cons":
+        assert params.sent_prob == 0.0, \
+            "When using SWBD-Cons, the sentence probability should be 0 but now %s" % params.sent_prob
+
+    # define multi-gpu inferring graph
+    def _tower_infer_graph(features):
+        sent_params = copy.copy(params)
+        sent_params.scope_name = sent_params.scope_name + "_sent"
+        sent_encoding_fn, sent_decoding_fn = sent_graph.infer_fn(sent_params)
+
+        doc_params = copy.copy(params)
+        doc_params.scope_name = doc_params.scope_name + "_doc"
+        doc_encoding_fn, doc_decoding_fn = doc_graph.infer_fn(doc_params)
+
+        def _encoding_fn(source, source_mask, sent_source, sent_source_mask):
+            model_state = {}
+
+            sent_model_state = sent_encoding_fn(sent_source, sent_source_mask)
+            model_state['sent'] = sent_model_state
+
+            doc_model_state = doc_encoding_fn(source, source_mask)
+            model_state['doc'] = doc_model_state
+
+            return model_state
+
+        def _decoding_fn(target, model_state, time, time_offset):
+            sent_step_logits, sent_step_state = sent_decoding_fn(target, model_state['sent'], time - time_offset)
+            doc_step_logits, doc_step_state = doc_decoding_fn(target, model_state['doc'], time)
+
+            model_state['sent'] = sent_step_state
+            model_state['doc'] = doc_step_state
+
+            model_logits = tf.nn.softmax(sent_step_logits) * params.sent_prob + tf.nn.softmax(doc_step_logits) * (
+                        1. - params.sent_prob)
+
+            return tf.log(model_logits), model_state
+
+        beam_output = imed_beam_search(features, _encoding_fn, _decoding_fn, params)
 
         return beam_output
 
@@ -125,9 +178,9 @@ def tower_score_graph(eval_features, graph, params):
     eval_outputs = parallel.parallel_model(
         _tower_infer_graph, eval_features,
         params.gpus, use_cpu=(len(params.gpus) == 0))
-    eval_scores = eval_outputs['score']
+    eval_scores, eval_memory = eval_outputs['score'], eval_outputs['memory']
 
-    return eval_scores
+    return eval_scores, eval_memory
 
 
 def train(params):
@@ -144,11 +197,15 @@ def train(params):
     train_dataset = Dataset(params.src_train_file, params.tgt_train_file,
                             params.src_vocab, params.tgt_vocab, params.max_len,
                             batch_or_token=params.batch_or_token,
-                            data_leak_ratio=params.data_leak_ratio)
+                            data_leak_ratio=params.data_leak_ratio,
+                            N_src=params.N_src, N_tgt=params.N_tgt,
+                            yaml_file=params.train_yaml_file)
     dev_dataset = Dataset(params.src_dev_file, params.tgt_dev_file,
                           params.src_vocab, params.src_vocab, params.eval_max_len,
                           batch_or_token='batch',
-                          data_leak_ratio=params.data_leak_ratio)
+                          data_leak_ratio=params.data_leak_ratio,
+                          N_src=params.N_src,N_tgt=params.N_tgt,
+                          yaml_file=params.dev_yaml_file)
     tf.logging.info(
         "End Loading dataset, within {} seconds".format(time.time() - start_time))
 
@@ -417,7 +474,8 @@ def train(params):
                     if gstep > 0 and gstep % params.sample_freq == 0:
                         tf.logging.info("Start Sampling")
                         decode_seqs, decode_scores = sess.run(
-                            [eval_seqs[:1], eval_scores[:1]], feed_dict={features[0]["source"]: data["src"][:5], features[0]["source_mask"]: data["src_mask"][:5]})
+                            [eval_seqs[:1], eval_scores[:1]], feed_dict={
+                                features[0]["source"]: data["src"][:5], features[0]["source_mask"]: data["src_mask"][:5]})
                         tranes, scores = evalu.decode_hypothesis(decode_seqs, decode_scores, params)
 
                         for sidx in range(min(5, len(scores))):
@@ -488,7 +546,9 @@ def evaluate(params):
     test_dataset = Dataset(params.src_test_file, params.tgt_test_file,
                            params.src_vocab, params.src_vocab, params.eval_max_len,
                            batch_or_token='batch',
-                           data_leak_ratio=params.data_leak_ratio)
+                           data_leak_ratio=params.data_leak_ratio,
+                           N_src=params.N_src,N_tgt=params.N_tgt,
+                           yaml_file=params.test_yaml_file)
     tf.logging.info(
         "End Loading dataset, within {} seconds".format(time.time() - start_time))
 
@@ -500,6 +560,11 @@ def evaluate(params):
                 "source": tf.placeholder(tf.float32, [None, None, params.speech_num_feature], "source"),
                 "source_mask": tf.placeholder(tf.float32, [None, None], "source_mask"),
             }
+            if params.inference_mode == "imed" or params.inference_mode == "swbd_cons":
+                feature["target"] = tf.placeholder(tf.int32, [None, None], "target")
+                feature["sent_source"] = tf.placeholder(tf.float32, [None, None, params.speech_num_feature],
+                                                        "sentence_level_source")
+                feature["sent_source_mask"] = tf.placeholder(tf.float32, [None, None], "sentence_level_source_mask")
             features.append(feature)
 
         # session info
@@ -512,7 +577,11 @@ def evaluate(params):
         graph = model.get_model(params.model_name)
 
         # set up infer graph
-        eval_seqs, eval_scores = tower_infer_graph(features, graph, params)
+        if params.inference_mode == "imed" or params.inference_mode == "swbd_cons":
+            sent_graph = model.get_model(params.model_name)
+            eval_seqs, eval_scores = imed_tower_infer_graph(features, sent_graph, graph, params)
+        else:
+            eval_seqs, eval_scores = tower_infer_graph(features, graph, params)
 
         tf.logging.info("End Building Inferring Graph, within {} seconds".format(time.time() - start_time))
 
@@ -537,7 +606,47 @@ def evaluate(params):
 
         # restore parameters
         tf.logging.info("Trying restore existing parameters")
-        eval_saver.restore(sess, params.output_dir)
+        if params.inference_mode == "imed" or params.inference_mode == "swbd_cons":
+            # restore parameters
+            tf.logging.info("Trying restore existing parameters")
+            all_var_list = {}
+            for midx, (params, gname) in enumerate(zip([params, params], ['sent', 'doc'])):
+                checkpoint = os.path.join(params.output_dir, "checkpoint")
+                assert tf.gfile.Exists(checkpoint)
+
+                latest_checkpoint = tf.gfile.Open(checkpoint).readline()
+                model_name = latest_checkpoint.strip().split(":")[1].strip()
+                model_name = model_name[1:-1]  # remove ""
+                model_path = os.path.join(params.output_dir, model_name)
+                model_path = os.path.abspath(model_path)
+
+                assert tf.gfile.Exists(model_path + ".meta")
+
+                tf.logging.warn("Starting Backup Restore {}-th Model".format(midx))
+
+                reader = tf.train.load_checkpoint(model_path)
+
+                # adapt the model names
+                for name, shape in tf.train.list_variables(model_path):
+                    model_name = name.split('/')[0]
+                    ensemble_name = "{}_{}/{}".format(model_name, gname, name[name.find('/') + 1:])
+                    all_var_list[ensemble_name] = reader.get_tensor(name)
+
+            ops = []
+            for var in tf.global_variables():
+                name = var.op.name
+
+                if name in all_var_list:
+                    tf.logging.info('{} **Good**'.format(name))
+                    ops.append(
+                        tf.assign(var, all_var_list[name])
+                    )
+                else:
+                    tf.logging.warn("{} --Bad--".format(name))
+            restore_op = tf.group(*ops, name="restore_global_vars")
+            sess.run(restore_op)
+        else:
+            eval_saver.restore(sess, params.output_dir)
         sess.run(ema_assign_op)
 
         tf.logging.info("Starting Evaluating")
@@ -564,7 +673,9 @@ def scorer(params):
     test_dataset = Dataset(params.src_test_file, params.tgt_test_file,
                            params.src_vocab, params.tgt_vocab, params.eval_max_len,
                            batch_or_token='batch',
-                           data_leak_ratio=params.data_leak_ratio)
+                           data_leak_ratio=params.data_leak_ratio,
+                           N_src=params.N_src,N_tgt=params.N_tgt,
+                           yaml_file=params.test_yaml_file)
     tf.logging.info(
         "End Loading dataset, within {} seconds".format(time.time() - start_time))
 
@@ -573,7 +684,8 @@ def scorer(params):
         features = []
         for fidx in range(max(len(params.gpus), 1)):
             feature = {
-                "source": tf.placeholder(tf.int32, [None, None], "source"),
+                "source": tf.placeholder(tf.float32, [None, None, params.speech_num_feature], "source"),
+                "source_mask": tf.placeholder(tf.float32, [None, None], "source_mask"),
                 "target": tf.placeholder(tf.int32, [None, None], "target"),
             }
             features.append(feature)
@@ -588,7 +700,7 @@ def scorer(params):
         graph = model.get_model(params.model_name)
 
         # set up infer graph
-        eval_scores = tower_score_graph(features, graph, params)
+        eval_scores, eval_memory = tower_score_graph(features, graph, params)
 
         tf.logging.info("End Building Inferring Graph, within {} seconds".format(time.time() - start_time))
 
@@ -618,7 +730,7 @@ def scorer(params):
 
         tf.logging.info("Starting Evaluating")
         eval_start_time = time.time()
-        scores, ppl = evalu.scoring(sess, features, eval_scores, test_dataset, params)
+        scores, ppl, memory = evalu.scoring(sess, features, eval_scores, eval_memory, test_dataset, params)
         eval_end_time = time.time()
 
         tf.logging.info(
@@ -628,6 +740,12 @@ def scorer(params):
 
         # save translation
         evalu.dump_tanslation(scores, params.test_output)
+
+        # save memory
+        hf = h5py.File(params.test_output + ".audio.h5", 'w')
+        for i, mem in enumerate(memory):
+            hf.create_dataset("audio_{}".format(i), data=mem)
+        hf.close()
 
     return np.mean(scores)
 

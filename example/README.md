@@ -1,6 +1,6 @@
 # Simple Example
 
-This file shows the rough procedure training an end-to-end SLT Transformer model based on MUST_C dataset.
+This file shows the rough procedure training an end-to-end context-aware SLT Transformer model based on MUST_C dataset.
 
 ### Step 1. Download MUST_C Dataset
 
@@ -70,11 +70,11 @@ This converts training set to `train.auido.h5.shuf.h5, train.bpe.en.shuf, train.
 
 ### Step 4. Train your model
 
-See the given running scripts `train.sh` for reference. It uses about 2~3 days (with one GPU) or shorter (with more gpus).
+See the given running scripts [`train.sh`](./train.sh) for reference. It uses about 3~4 days (with one GPU) or shorter (with more gpus).
 
 To train AFS models, please follow `afs_step_*.sh`
 
 ### Step 5. Decoding
 
-See the given running scripts `test.sh` for reference.
+See the given running scripts [`test.sh`](./test.sh) for reference.
 

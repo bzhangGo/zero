@@ -377,7 +377,7 @@ def ffn_layer(x, d, d_o, dropout=None, scope=None):
 
 
 def add_timing_signal(x, min_timescale=1.0, max_timescale=1.0e4,
-                      time=None, name=None):
+                      time=None, name=None, add_length=False):
     """Transformer Positional Embedding"""
 
     with tf.name_scope(name, default_name="add_timing_signal", values=[x]):
@@ -387,7 +387,10 @@ def add_timing_signal(x, min_timescale=1.0, max_timescale=1.0e4,
             position = dtype.tf_to_float(tf.range(length))
         else:
             # decoding position embedding
-            position = tf.expand_dims(time, 0)
+            if not add_length:
+                position = tf.expand_dims(time, 0)
+            else:
+                position = dtype.tf_to_float(tf.range(length)) + time
         num_timescales = channels // 2
 
         log_timescale_increment = (

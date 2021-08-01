@@ -20,17 +20,30 @@ To solve this problem, we base our study on our previously proposed [adaptive fe
 approach. AFS automatically filters out uninformative speech encodings (about ~84%), which greatly narrows the length gap 
 between speech and its transcript. 
 
-As a consequence, we adopt a three-step training framework:
-- **Step 1** Pretrain a sentence-level ASR Encoder-Decoder model with MLE loss and CTC loss.
-- **Step 2** Add AFS into ASR, resulting in ASR Encoder-AFS-Decoder model, and finetune this ASR model with MLE alone.
-- **Step 3** Extract the retained speech encodings offered by AFS, and treat this shortened sequence as speech input. On
-top of this, we prform context-aware end-to-end ST.
+As a consequence, we adopt a four-step training framework:
+
+* AFS pretraining
+    - [**Step 1**](./example/afs_step_1_asr_pretrain.sh) Pretrain a sentence-level ASR Encoder-Decoder model with MLE loss and CTC loss.
+    - [**Step 2**](./example/afs_step_2_afs_pretrain.sh) Add AFS into ASR, resulting in ASR Encoder-AFS-Decoder model, and finetune this ASR model with MLE alone.
+* Sentence-level ST pretraining
+    - [**Step 3**](./example/afs_step_3_afs_st_train.sh) Drop ASR Decoder and freeze ASR Encoder-AFS structure and treat it as a dynamic feature extractor. On top of 
+it, pretrain a sentence-level end-to-end ST Encoder-Decoder model.
+* Document-level ST finetuning
+    - **Step 4** Use ASR Encoder-AFS model to extract speech features, and finetune the sentence-level ST model on concatenated 
+speech feature sequences to grow it to the document-level ST.
+
+Note we observe that sentence-level ST pretraining improves the context-aware ST in our experiments.
 
 
-In this codebase, we provide scripts and instructions for MuST-C and LibriSpeech translation tasks. 
-* Please go to the [Example](./example) for more details.
-* Please go to [readme](https://github.com/bzhangGo/zero/blob/master/docs/afs_speech_translation)
-for more method description.
+### Model Evaluation
+
+We adopt different strategies for inference, including chunk-based decoding (cbd), sliding-window based decoding without target prefix
+constraint (swbd), sliding-window based decoding with target prefix constrant (swbd-cons) and in-model ensemble decoding (imed).
+
+These decoding methods mainly differ in how to handle target-side context. IMED is the one we mainly used in our paper, and CBD is the 
+simplest one.
+
+We implement all these decoding methods in this code base. 
 
 
 ### Potential Mismatch

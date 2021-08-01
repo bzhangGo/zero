@@ -6,7 +6,7 @@ data=path-to-preprocessed-ende-dataset/
 zero=path-to-zero-codebase/
 afs_pretrained_model=path-to-afs-output-dir/
 
-# the second step is to filter the speech features learned from the AFS encoder
+# the third step is to filter the speech features learned from the AFS encoder
 # only feeding those transcript-relevant features for speech translation
 
 # AFS^t: enable_afs_t=True
