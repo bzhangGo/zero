@@ -22,7 +22,7 @@ We study context-aware ST in this project and using a simple concatenation-based
 * Contextual modeling improves translation quality and reduces latency and flicker for simultaneous translation under re-translation strategy
 
 
-### Overview
+### Context Aware ST
 
 We use AFS to reduce the audio feature length and improve training efficiency. Figure below shows our overall framework:
 
