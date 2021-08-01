@@ -20,7 +20,7 @@ To solve this problem, we base our study on our previously proposed [adaptive fe
 approach. AFS automatically filters out uninformative speech encodings (about ~84%), which greatly narrows the length gap 
 between speech and its transcript. 
 
-As a consequence, we adopt a four-step training framework:
+As a consequence, we adopt a four-step training framework (We show walk-through examples [here](./example)):
 
 * AFS pretraining
     - [**Step 1**](./example/afs_step_1_asr_pretrain.sh) Pretrain a sentence-level ASR Encoder-Decoder model with MLE loss and CTC loss.
@@ -29,7 +29,7 @@ As a consequence, we adopt a four-step training framework:
     - [**Step 3**](./example/afs_step_3_afs_st_train.sh) Drop ASR Decoder and freeze ASR Encoder-AFS structure and treat it as a dynamic feature extractor. On top of 
 it, pretrain a sentence-level end-to-end ST Encoder-Decoder model.
 * Document-level ST finetuning
-    - **Step 4** Use ASR Encoder-AFS model to extract speech features, and finetune the sentence-level ST model on concatenated 
+    - [**Step 4**](./example/afs_step_4_context_aware_st_train.sh) Use ASR Encoder-AFS model to extract speech features, and finetune the sentence-level ST model on concatenated 
 speech feature sequences to grow it to the document-level ST.
 
 Note we observe that sentence-level ST pretraining improves the context-aware ST in our experiments.

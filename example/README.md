@@ -78,3 +78,7 @@ To train AFS models, please follow `afs_step_*.sh`
 
 See the given running scripts [`test.sh`](./test.sh) for reference.
 
+### Evaluation
+
+Apart from BLEU scores, we also evaluate [pronoun](./pronoun_eval.sh) and [homophone](./homophone_eval.md) translations.
+
