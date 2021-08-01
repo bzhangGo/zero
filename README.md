@@ -10,6 +10,7 @@ A neural machine translation system implemented by python2 + tensorflow.
 
 We associate each paper below with a readme file link. Please click the paper link you are interested for more details.
 
+* [Beyond Sentence-Level End-to-End Speech Translation: Context Helps, ACL2021](docs/context_aware_st)
 * [On Sparsifying Encoder Outputs in Sequence-to-Sequence Models, ACL2021 Findings](docs/l0drop)
 * [Fast Interleaved Bidirectional Sequence Generation, WMT2020](docs/interleaved_bidirectional_transformer)
 * [Adaptive Feature Selection for End-to-End Speech Translation, EMNLP2020 Findings](docs/afs_speech_translation)
