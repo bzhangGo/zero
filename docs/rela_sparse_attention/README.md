@@ -26,7 +26,7 @@ softmax as an activation function for attention scores. ReLU naturally leads to 
 apply [RMSNorm](https://openreview.net/pdf?id=BylmcHHgIB) to attention outputs to stabilize model training. Below
 shows the difference between ReLA and the vanilla attention.
 
-<img src="rela.png"  width=400 />
+<img src="rela.png"  width=600 />
 
 We find that:
 * ReLA achieves comparable translation performance to the softmax-based attention on five translation tasks, with 
@@ -106,13 +106,13 @@ output_dir="train"
 
 * Source-target attention of ReLA aligns better with word alignment
 
-<img src="aer.png"  width=400 />
+<img src="aer.png"  width=600 />
 
 Note solid curves are for best head per layer, while dashed curves are average results over heads.
 
 * ReLA enables null-attention: attend to nothing
 
-<img src="null.png"  width=400 />
+<img src="null.png"  width=1600 />
 
 
 ### Citation
