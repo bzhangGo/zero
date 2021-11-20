@@ -79,6 +79,12 @@ def valid_apply_dropout(x, dropout):
     return x
 
 
+def layer_dropout(dropped, no_dropped, dropout_rate):
+    """Layer Dropout"""
+    pred = tf.random_uniform([]) < dropout_rate
+    return tf.cond(pred, lambda: dropped, lambda: no_dropped)
+
+
 def label_smooth(labels, vocab_size, factor=0.1):
     """Smooth the gold label distribution"""
     if 0. < factor < 1.:
