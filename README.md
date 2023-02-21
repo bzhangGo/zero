@@ -10,6 +10,7 @@ A neural machine translation system implemented by python2 + tensorflow.
 
 We associate each paper below with a readme file link. Please click the paper link you are interested for more details.
 
+* [Efficient CTC Regularization via Coarse Labels for End-to-End Speech Translation, EACL2023](docs/colactc)
 * [Revisiting End-to-End Speech-to-Text Translation From Scratch, ICML2022](https://github.com/bzhangGo/st_from_scratch)
 * [Sparse Attention with Linear Units, EMNLP2021](docs/rela_sparse_attention)
 * [Edinburgh's End-to-End Multilingual Speech Translation System for IWSLT 2021, IWSLT2021 System submission](docs/iwslt2021_uoe_submission)
