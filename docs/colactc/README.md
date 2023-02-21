@@ -3,7 +3,7 @@
 - [paper link]()
 - source code is available at [st_from_scratch](https://github.com/bzhangGo/st_from_scratch)
 
-**Why CTC Regularization?**
+### **Why CTC Regularization?**
 
 Speech translation (ST) requires the model to capture the semantics of an audio input, 
 but auido carries many content-irrelevant information, such as emotion and pauses, that increases the
@@ -14,7 +14,7 @@ discrete labels, down-weighting content-irrelevant information and encouraging t
 literature, many studies have confirmed its effectiveness on ST.
 
 
-**Why NOT CTC Regularization?**
+### **Why NOT CTC Regularization?**
 
 CTC Regularization requires an extra projection layer similar to the word prediction layer, which bringins in 
 many model parameters and slows the running.
@@ -22,7 +22,7 @@ many model parameters and slows the running.
 We are particularly interested in improving the efficiency of CTC Regularization.
 
 
-**CoLaCTC**
+### **CoLaCTC**
 
 *Why use genuine labels for CTC regulariation?* particularly considering the CTC regularizaiton layer will be dropped
 after training.
@@ -30,10 +30,11 @@ after training.
 Following this idea, we propose to use pseudo CTC labels at coarser grain for CTC regularization, which offers a direct
 control over the CTC space and decoupled this space with the genuine word vocabulary space. 
 We only used some simple operations to produce CoLaCTC labels as follows:
-<img src="colactc.png"  width=400 />
+
+<img src="colactc.png"  />
 
 
-**How does it work?**
+### **How does it work?**
 
 
 | System                                                | Params | BLEU | Speedup |
@@ -46,12 +47,13 @@ We only used some simple operations to produce CoLaCTC labels as follows:
 
 (Quality on MuST-C En-De)
 
-**Why does it work?**
+### **Why does it work?**
 
 We are still lack of understanding on why it could work so well on ST. One observation is that CoLaCTC label sequence is 
 still quite informative. Using it as the source input for machine translation could achieve decent
 performance:
-<img src="mt.png"  width=200 />
+
+<img src="mt.png" />
 
 
 ### Model Training & Evaluation
