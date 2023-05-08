@@ -97,4 +97,4 @@ When developing this repository, I referred to the following projects:
 * [Keras](https://github.com/keras-team/keras)
 
 ## Contact
-For any questions or suggestions, please feel free to contact [Biao Zhang](mailto:B.Zhang@ed.ac.uk)
+For any questions or suggestions, please feel free to contact [Biao Zhang](mailto:biaojiaxing@gmail.com)
